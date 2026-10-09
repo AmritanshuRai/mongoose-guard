@@ -1,0 +1,232 @@
+{
+  "signup-ok": {
+    "ok": true,
+    "data": {
+      "name": "Amrit",
+      "email": "amrit@example.com",
+      "password": "correct-horse"
+    }
+  },
+  "mass-assignment": {
+    "ok": false,
+    "issues": [
+      {
+        "code": "forbidden_field",
+        "path": "role",
+        "message": "Field is not allowed"
+      },
+      {
+        "code": "forbidden_field",
+        "path": "credits",
+        "message": "Field is not allowed"
+      }
+    ]
+  },
+  "typo": {
+    "ok": false,
+    "issues": [
+      {
+        "code": "unknown_field",
+        "path": "nmae",
+        "message": "Unknown field"
+      }
+    ]
+  },
+  "wrong-type": {
+    "ok": false,
+    "issues": [
+      {
+        "code": "invalid_type",
+        "path": "age",
+        "message": "Expected number, received string"
+      }
+    ]
+  },
+  "rules": {
+    "ok": false,
+    "issues": [
+      {
+        "code": "invalid_value",
+        "path": "email",
+        "message": "Path `email` is required.",
+        "rule": "required"
+      },
+      {
+        "code": "invalid_value",
+        "path": "name",
+        "message": "Path `name` (`A`, length 1) is shorter than the minimum allowed length (2).",
+        "rule": "minlength"
+      },
+      {
+        "code": "invalid_value",
+        "path": "password",
+        "message": "Path `password` (`123`, length 3) is shorter than the minimum allowed length (8).",
+        "rule": "minlength"
+      }
+    ]
+  },
+  "proto": {
+    "ok": false,
+    "issues": [
+      {
+        "code": "unsafe_key",
+        "path": "__proto__",
+        "message": "Key \"__proto__\" is reserved"
+      }
+    ]
+  },
+  "operator-typed": {
+    "ok": false,
+    "issues": [
+      {
+        "code": "invalid_type",
+        "path": "email",
+        "message": "Expected string, received object"
+      }
+    ]
+  },
+  "operator-mixed": {
+    "ok": false,
+    "issues": [
+      {
+        "code": "unsafe_key",
+        "path": "preferences.filter.$where",
+        "message": "Keys starting with $ are not allowed"
+      }
+    ]
+  },
+  "nested-unknown": {
+    "ok": false,
+    "issues": [
+      {
+        "code": "unknown_field",
+        "path": "address.hacked",
+        "message": "Unknown field"
+      }
+    ]
+  },
+  "nested-narrow": {
+    "ok": false,
+    "issues": [
+      {
+        "code": "forbidden_field",
+        "path": "address.zip",
+        "message": "Field is not allowed"
+      }
+    ]
+  },
+  "nested-rules": {
+    "ok": false,
+    "issues": [
+      {
+        "code": "invalid_value",
+        "path": "address.zip",
+        "message": "Path `zip` is invalid (12).",
+        "rule": "regexp"
+      }
+    ]
+  },
+  "array-type": {
+    "ok": false,
+    "issues": [
+      {
+        "code": "invalid_type",
+        "path": "tags.1",
+        "message": "Expected string, received number"
+      }
+    ]
+  },
+  "patch-ok": {
+    "ok": true,
+    "data": {
+      "age": 20
+    }
+  },
+  "patch-bad": {
+    "ok": false,
+    "issues": [
+      {
+        "code": "invalid_value",
+        "path": "age",
+        "message": "Path `age` (5) is less than minimum allowed value (13).",
+        "rule": "min"
+      }
+    ]
+  },
+  "full-missing-required": {
+    "ok": false,
+    "issues": [
+      {
+        "code": "invalid_value",
+        "path": "name",
+        "message": "Path `name` is required.",
+        "rule": "required"
+      }
+    ]
+  },
+  "strip": {
+    "ok": true,
+    "data": {
+      "name": "Amrit"
+    }
+  },
+  "strip-type": {
+    "ok": false,
+    "issues": [
+      {
+        "code": "invalid_type",
+        "path": "name",
+        "message": "Expected string, received number"
+      }
+    ]
+  },
+  "body-array": {
+    "ok": false,
+    "issues": [
+      {
+        "code": "invalid_body",
+        "path": "",
+        "message": "Expected a JSON object"
+      }
+    ]
+  },
+  "body-null": {
+    "ok": false,
+    "issues": [
+      {
+        "code": "invalid_body",
+        "path": "",
+        "message": "Expected a JSON object"
+      }
+    ]
+  },
+  "data-raw": {
+    "ok": true,
+    "data": {
+      "name": "Amrit",
+      "email": "AMRIT@EXAMPLE.COM",
+      "password": "correct-horse"
+    }
+  },
+  "null-optional": {
+    "ok": true,
+    "data": {
+      "age": null
+    }
+  },
+  "nested-null": {
+    "ok": false,
+    "issues": [
+      {
+        "code": "invalid_type",
+        "path": "profile",
+        "message": "Expected object, received null"
+      }
+    ]
+  },
+  "config:adress": "GuardConfigError: mongoose-guard: allow entry \"adress\" does not match the schema (\"adress\" not found)",
+  "config:tags.0": "GuardConfigError: mongoose-guard: allow entry \"tags.0\" reaches inside \"tags\", which has no named fields",
+  "config:preferences.theme": "GuardConfigError: mongoose-guard: allow entry \"preferences.theme\" reaches inside \"preferences\", which has no named fields",
+  "config:profile.age": "GuardConfigError: mongoose-guard: allow entry \"profile.age\" does not match the schema (\"profile.age\" not found)",
+  "config:": "GuardConfigError: mongoose-guard: invalid allow entry \"\""
+}
