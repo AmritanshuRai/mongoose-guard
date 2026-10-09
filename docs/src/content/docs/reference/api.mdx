@@ -1,0 +1,181 @@
+---
+title: API reference
+description: Complete reference for every export of mongoose-guard, mongoose-guard/express and mongoose-guard/web, with signatures, parameters, return values and errors.
+---
+
+<div class="answer">
+mongoose-guard has three entry points. `mongoose-guard` exports `createGuard`, `validateBody`, `GuardConfigError` and the shared types. `mongoose-guard/express` exports `guard`, an Express middleware factory. `mongoose-guard/web` exports `guard` for standard `Request` objects and `invalidResponse`.
+</div>
+
+## `mongoose-guard`
+
+### `createGuard(model, options)`
+
+```ts
+function createGuard<TData = Record<string, unknown>>(
+  model: GuardableModel,
+  options: GuardOptions,
+): Guard<TData>;
+```
+
+Compiles a guard for one model and one allow list. Call it once and reuse the result.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `model` | `GuardableModel` | A Mongoose model, as returned by `mongoose.model()`. |
+| `options` | `GuardOptions` | See [Options](/reference/options/). |
+
+**Returns** a `Guard<TData>`.
+
+**Throws**, synchronously:
+
+- `GuardConfigError` if an `allow` entry doesn't match the schema, reaches inside a field with no named keys, is empty, or if `allow` isn't an array, or `unknown` isn't `"reject"` or `"strip"`.
+- `TypeError` if `model` doesn't have a Mongoose schema.
+
+### `Guard.validate(body)`
+
+```ts
+interface Guard<TData = Record<string, unknown>> {
+  validate(body: unknown): Promise<GuardResult<TData>>;
+}
+```
+
+Validates one body. Safe to call concurrently.
+
+**Resolves** to `{ ok: true, data }` or `{ ok: false, issues }`. Validation failures never reject.
+
+**Rejects** only when something other than validation breaks, such as a `pre("validate")` hook that throws. The original error is passed through.
+
+### `validateBody(model, body, options)`
+
+```ts
+function validateBody<TData = Record<string, unknown>>(
+  model: GuardableModel,
+  body: unknown,
+  options: GuardOptions,
+): Promise<GuardResult<TData>>;
+```
+
+`createGuard(model, options).validate(body)` in one call. It recompiles the allow list each time, so prefer `createGuard` for request handling. Configuration errors come back as a rejected promise.
+
+### `GuardConfigError`
+
+```ts
+class GuardConfigError extends Error {
+  name: "GuardConfigError";
+}
+```
+
+Thrown for invalid options. Every message starts with `mongoose-guard:`. Check for it with `instanceof GuardConfigError`, which works across all three entry points.
+
+## `mongoose-guard/express`
+
+### `guard(model, options)`
+
+```ts
+function guard(model: GuardableModel, options: ExpressGuardOptions): RequestHandler;
+
+interface ExpressGuardOptions extends GuardOptions {
+  onInvalid?: InvalidHandler;
+}
+
+type InvalidHandler = (
+  issues: Issue[],
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => void;
+```
+
+Creates Express middleware. Works with Express 4 and 5.
+
+| When | What happens |
+|---|---|
+| validation passes | `req.validated` is set to the accepted data and `next()` is called |
+| validation fails | `onInvalid(issues, req, res, next)` is called. The default sends `400` with `{ errors: issues }`. |
+| something else throws | `next(error)` is called |
+
+`req.body` is never modified.
+
+**Throws** the same configuration errors as `createGuard`, when the middleware is created.
+
+### `req.validated`
+
+```ts
+declare global {
+  namespace Express {
+    interface Request {
+      validated?: Record<string, unknown>;
+    }
+  }
+}
+```
+
+Added to Express's types when you import `mongoose-guard/express`.
+
+## `mongoose-guard/web`
+
+### `guard(model, options)`
+
+```ts
+function guard<TData = Record<string, unknown>>(
+  model: GuardableModel,
+  options: GuardOptions,
+): RequestGuard<TData>;
+
+type RequestGuard<TData> = (request: Request) => Promise<GuardResult<TData>>;
+```
+
+Creates a function that reads `request.json()` and validates the result.
+
+- Invalid or empty JSON resolves to `{ ok: false, issues: [{ code: "invalid_body", path: "", message: "Request body must be valid JSON" }] }`.
+- The `Content-Type` header isn't checked.
+- The request body is consumed. Pass `request.clone()` if you need to read it again.
+
+### `invalidResponse(issues, init?)`
+
+```ts
+function invalidResponse(issues: Issue[], init?: ResponseInit): Response;
+```
+
+Returns `Response.json({ errors: issues }, { status: 400, ...init })`. Pass `init` to change the status or add headers.
+
+## Types
+
+```ts
+interface GuardOptions {
+  allow: readonly string[];
+  partial?: boolean;
+  unknown?: "reject" | "strip";
+}
+
+type UnknownFieldPolicy = "reject" | "strip";
+
+type GuardResult<TData = Record<string, unknown>> =
+  | { ok: true; data: TData }
+  | { ok: false; issues: Issue[] };
+
+interface Issue {
+  code: IssueCode;
+  path: string;
+  message: string;
+  rule?: string;
+}
+
+type IssueCode =
+  | "invalid_body"
+  | "unsafe_key"
+  | "unknown_field"
+  | "forbidden_field"
+  | "invalid_type"
+  | "invalid_value";
+
+interface GuardableModel {
+  readonly schema: object;
+  new (doc?: Record<string, unknown>): {
+    validate(pathsToValidate?: string[]): Promise<unknown>;
+  };
+}
+```
+
+`GuardableModel` is deliberately loose, so models from Mongoose 8 and 9, with or without generics, all fit.

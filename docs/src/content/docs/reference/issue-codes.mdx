@@ -1,0 +1,95 @@
+---
+title: Issue codes
+description: The six issue codes mongoose-guard returns, invalid_body, unsafe_key, unknown_field, forbidden_field, invalid_type and invalid_value, with every message, cause and fix.
+---
+
+<div class="answer">
+Every issue has one of six codes. `invalid_body`, `unsafe_key`, `unknown_field`, `forbidden_field` and `invalid_type` come from mongoose-guard's own checks. `invalid_value` comes from your Mongoose schema's validators, and carries a `rule` field naming which one failed. Codes are stable, so branch on them in code. Messages are for people and may be reworded.
+</div>
+
+## `invalid_body`
+
+The body as a whole can't be validated. `path` is `""`, except for the depth limit below.
+
+| Message | Cause | Fix |
+|---|---|---|
+| `Expected a JSON object` | The body is an array, string, number, `null` or missing. | Send a JSON object. In Express, add `app.use(express.json())` before the guard. |
+| `Request body must be valid JSON` | Web adapter only: the body isn't valid JSON, or it's empty. | Send valid JSON. |
+| `Value is nested too deeply` | A value inside a Mixed field is nested more than 32 levels deep. `path` points at the deep value. | Flatten the data, or give the field a real schema. |
+
+## `unsafe_key`
+
+A key that's never accepted, anywhere in the body.
+
+| Message | Example key |
+|---|---|
+| `Key "__proto__" is reserved` | `__proto__`, also `constructor` and `prototype` |
+| `Keys starting with $ are not allowed` | `$where`, `$gt`, `$set` |
+| `Keys containing a dot are not allowed` | `"address.city"` used as a key |
+
+Reported in strip mode too. See [Security](/understand/security/).
+
+## `unknown_field`
+
+**Message:** `Unknown field`
+
+The key doesn't exist in the schema at this position. Usually a typo (`nmae`) or a field from another model. Removed silently in strip mode.
+
+## `forbidden_field`
+
+**Message:** `Field is not allowed`
+
+The key exists in the schema but isn't in this route's `allow` list. This is the mass-assignment check. Removed silently in strip mode.
+
+## `invalid_type`
+
+**Message:** `Expected <type>, received <actual>`
+
+The value has the wrong JavaScript type. `<actual>` is one of `string`, `number`, `boolean`, `object`, `array`, `null`, `date`, `bigint` or `undefined`.
+
+| `<type>` | For schema type |
+|---|---|
+| `string` | String |
+| `number` | Number, Double |
+| `32-bit integer` | Int32 |
+| `integer` | BigInt |
+| `boolean` | Boolean |
+| `ISO 8601 date` | Date |
+| `ObjectId` | ObjectId |
+| `decimal` | Decimal128 |
+| `UUID` | UUID |
+| `string or binary data` | Buffer |
+| `object` | nested objects, sub-schemas, Maps, elements of document arrays |
+| `array` | arrays |
+
+`invalid_type` can also come from Mongoose, if a custom SchemaType fails to cast. In that case the message is Mongoose's and `rule` is set.
+
+## `invalid_value`
+
+**Message:** whatever the Mongoose validator says, including custom messages from your schema.
+
+`rule` tells you which validator failed. It's Mongoose's validator `kind`:
+
+| `rule` | Schema option |
+|---|---|
+| `required` | `required` |
+| `min`, `max` | `min`, `max` on numbers and dates |
+| `minlength`, `maxlength` | `minLength`, `maxLength` on strings |
+| `enum` | `enum` |
+| `regexp` | `match` |
+| `user defined` | a custom `validate` function |
+
+Real example:
+
+```json
+{
+  "code": "invalid_value",
+  "path": "password",
+  "message": "Path `password` (`123`, length 3) is shorter than the minimum allowed length (8).",
+  "rule": "minlength"
+}
+```
+
+## Order
+
+Issues from mongoose-guard's own checks are listed in the order their keys appear in the body. If any of those exist, Mongoose validation doesn't run, so you never get `invalid_value` issues mixed in with structural ones. `invalid_value` issues come in the order Mongoose reports them.

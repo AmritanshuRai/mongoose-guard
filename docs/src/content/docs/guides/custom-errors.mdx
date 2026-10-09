@@ -1,0 +1,102 @@
+---
+title: Custom error responses
+description: Change the status code and JSON shape mongoose-guard sends for invalid requests, with onInvalid in Express and with your own response in web frameworks, including RFC 9457 problem details.
+---
+
+<div class="answer">
+In Express, pass an `onInvalid(issues, req, res, next)` function to `guard()` and send whatever response you want. In web frameworks, the guard returns the issues and you build the response yourself. The default is a `400` with `{ "errors": issues }`.
+</div>
+
+## Express: `onInvalid`
+
+```ts
+guard(User, {
+  allow: ["name", "email"],
+  onInvalid: (issues, req, res) => {
+    res.status(422).json({
+      message: "Validation failed",
+      fields: Object.fromEntries(issues.map((issue) => [issue.path, issue.message])),
+    });
+  },
+});
+```
+
+`onInvalid` replaces the default response completely. Your handler doesn't run unless you call `next()` yourself.
+
+### Reuse one handler everywhere
+
+Write it once and pass it to every guard:
+
+```ts
+import type { InvalidHandler } from "mongoose-guard/express";
+
+export const sendValidationError: InvalidHandler = (issues, req, res) => {
+  res.status(400).json({ error: "VALIDATION_FAILED", issues });
+};
+
+router.post("/users", guard(User, { allow: ["name"], onInvalid: sendValidationError }), createUser);
+```
+
+Or wrap `guard` so nobody can forget:
+
+```ts
+import { guard as baseGuard, type ExpressGuardOptions } from "mongoose-guard/express";
+
+export const guard = (model: Parameters<typeof baseGuard>[0], options: ExpressGuardOptions) =>
+  baseGuard(model, { onInvalid: sendValidationError, ...options });
+```
+
+### Hand off to your error handler
+
+If your app already has a central error handler, turn the issues into an error and pass it on:
+
+```ts
+class ValidationError extends Error {
+  constructor(readonly issues: Issue[]) {
+    super("Validation failed");
+  }
+}
+
+const forwardToErrorHandler: InvalidHandler = (issues, req, res, next) => {
+  next(new ValidationError(issues));
+};
+```
+
+## Problem details (RFC 9457)
+
+Some APIs use the standard `application/problem+json` format:
+
+```ts
+const problemDetails: InvalidHandler = (issues, req, res) => {
+  res
+    .status(400)
+    .type("application/problem+json")
+    .json({
+      type: "https://example.com/problems/validation",
+      title: "Your request body is invalid",
+      status: 400,
+      instance: req.originalUrl,
+      errors: issues,
+    });
+};
+```
+
+## Web frameworks
+
+The web guard never sends a response itself. Build one from `result.issues`:
+
+```ts
+const result = await validateUser(request);
+if (!result.ok) {
+  return Response.json(
+    { message: "Validation failed", fields: result.issues.map(({ path, message }) => ({ path, message })) },
+    { status: 422 },
+  );
+}
+```
+
+`invalidResponse(issues, init)` is a shortcut for the default shape. It accepts a `status` and `headers` in `init`.
+
+## Should you show `message` to users?
+
+`message` is written for developers, and Mongoose's messages mention internal names (``Path `name` is required.``). For an API used by your own frontend, mapping `code`, `path` and `rule` to friendly text in the frontend usually gives the best result. [Results and issues](/concepts/results-and-issues/) has an example. You can also put friendly messages straight into the Mongoose schema, and they come through unchanged.

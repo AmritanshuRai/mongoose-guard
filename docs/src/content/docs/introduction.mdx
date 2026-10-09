@@ -1,0 +1,125 @@
+---
+title: What is mongoose-guard?
+description: A beginner-friendly explanation of mongoose-guard, the problem it solves, how it fits next to Mongoose, and the words used throughout these docs.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+<div class="answer">
+mongoose-guard is an npm package that validates the JSON body of an HTTP request using a Mongoose model you already wrote. For each route you give it an `allow` list of fields. It then rejects anything outside that list, checks every value's type without converting it, and runs your schema's own validation rules. If something is wrong, your route handler never runs and the client gets a list of precise errors.
+</div>
+
+## The problem, in one example
+
+Say you have a User model. Like most real models, it has fields a visitor should never be able to set:
+
+```ts
+const userSchema = new Schema({
+  name: { type: String, required: true, minLength: 2 },
+  email: { type: String, required: true, lowercase: true },
+  password: { type: String, required: true, minLength: 8 },
+  role: { type: String, enum: ["user", "admin"], default: "user" },
+  credits: { type: Number, default: 0 },
+  isVerified: { type: Boolean, default: false },
+});
+
+const User = model("User", userSchema);
+```
+
+And a signup route that saves whatever comes in:
+
+```ts
+app.post("/signup", async (req, res) => {
+  const user = await User.create(req.body);
+  res.status(201).json(user);
+});
+```
+
+Now someone sends this:
+
+```json
+{
+  "name": "Amrit",
+  "email": "amrit@example.com",
+  "password": "correct-horse",
+  "role": "admin",
+  "credits": 99999
+}
+```
+
+Mongoose accepts it. Every field is valid according to the schema. That person is now an admin with 99,999 credits. This bug is called **mass assignment**. OWASP files it under API3:2023, Broken Object Property Level Authorization, in its API Security Top 10.
+
+The schema answers "what does a correct user look like?" It can't answer "what is *this route* allowed to change?" That second question is the one mongoose-guard answers.
+
+## The fix
+
+```ts
+import { guard } from "mongoose-guard/express";
+
+app.post(
+  "/signup",
+  guard(User, { allow: ["name", "email", "password"] }),
+  async (req, res) => {
+    const user = await User.create(req.validated);
+    res.status(201).json(user);
+  },
+);
+```
+
+The same malicious request now gets a 400 before your handler runs:
+
+```json
+{
+  "errors": [
+    { "code": "forbidden_field", "path": "role", "message": "Field is not allowed" },
+    { "code": "forbidden_field", "path": "credits", "message": "Field is not allowed" }
+  ]
+}
+```
+
+## Why not just use Mongoose validation?
+
+Mongoose already validates. But it was built to protect your *database*, not to check what a *client* sent. Three of its defaults surprise people:
+
+1. **It casts.** A Number field accepts `"25"` and stores `25`. A Boolean field accepts `"false"`. That's convenient inside your own code and confusing at an API boundary, where a wrong type usually means a client bug.
+2. **It drops unknown fields silently.** With the default `strict` mode, a typo like `"emial"` is dropped before saving, and nobody is told.
+3. **It has no idea which route is running.** Every field in the schema is equally valid, everywhere.
+
+mongoose-guard keeps Mongoose's rules and fixes those three gaps. See [the comparison page](/understand/comparison/) for a full side-by-side.
+
+## Why not just use Zod?
+
+You can, and for some projects you should. The cost is that you end up describing every model twice: once in Mongoose for the database and once in Zod for requests. The two copies drift. Someone adds `maxLength: 160` to the Mongoose `bio` field and forgets the Zod schema, and now the API accepts a value the database rejects.
+
+mongoose-guard is for projects where request bodies look like your models and you'd rather keep one definition. [When to use it](/when-to-use/) goes through the trade-off in detail.
+
+## How it fits into a request
+
+```text
+client ──► express.json() ──► guard(User, { allow }) ──► your handler ──► User.create()
+                                      │
+                                      └── 400 { errors: [...] } if anything is wrong
+```
+
+1. Your framework parses the JSON body.
+2. mongoose-guard checks it against the model and the allow list.
+3. Only if everything passes does your handler run, with the checked data on `req.validated`.
+
+It never connects to MongoDB itself and never saves anything. Validation happens in memory, so you can use it in tests without a database. The exception is a custom async validator of yours that queries the database: that one still runs.
+
+## Words used in these docs
+
+| Term | Meaning |
+|---|---|
+| **Model** | What `mongoose.model("User", schema)` returns. mongoose-guard reads the schema from it. |
+| **Schema path** | A field's address inside the schema, written with dots: `name`, `address.city`, `profile.bio`. |
+| **Allow list** | The `allow` option: the paths a particular route accepts. |
+| **Guard** | A compiled validator for one model and one allow list. You create it once and use it for every request. |
+| **Issue** | One problem found in a request body, with a `code`, a `path` and a `message`. |
+| **Sub-schema** | A schema nested inside another (`address: addressSchema`). Mongoose also calls these single nested subdocuments. |
+| **Document array** | An array of sub-schemas (`addresses: [addressSchema]`). |
+| **Partial mode** | Validating only the fields that were sent, for PATCH routes. |
+
+<Aside type="tip">
+New to all of this? Read [Quick start](/quick-start/) next. It builds a working route from an empty folder and shows the exact responses you'll see.
+</Aside>

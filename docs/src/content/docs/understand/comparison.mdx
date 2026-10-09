@@ -1,0 +1,61 @@
+---
+title: mongoose-guard vs Zod, Joi, express-validator and Mongoose
+sidebar:
+  label: Comparison
+description: An honest comparison of mongoose-guard with Zod, Joi, express-validator and Mongoose's built-in validation, covering defaults, casting, unknown fields, allow lists and when each one is the better choice.
+---
+
+<div class="answer">
+mongoose-guard is narrower than Zod, Joi or express-validator. It only validates bodies that map onto a Mongoose model, and in exchange it needs no second schema. Zod and Joi validate any data and are better for requests with no model behind them. express-validator is a per-field chain for Express. Mongoose's own validation protects the database but casts types, drops unknown fields silently and doesn't know which route is running.
+</div>
+
+## Side by side
+
+| | mongoose-guard | Zod | Joi | express-validator | Mongoose alone |
+|---|---|---|---|---|---|
+| Where the rules live | your Mongoose schema | a Zod schema | a Joi schema | chains per route | your Mongoose schema |
+| Second schema to maintain | no | yes | yes | yes, as chains | no |
+| Unknown keys, by default | rejected | removed silently | rejected | ignored | removed silently |
+| `"25"` for a number, by default | rejected | rejected | converted to `25` | depends on the chain | converted to `25` |
+| Per-route field allowlist | built in (`allow`) | one schema per route, or `.pick()` | one schema per route | one chain per route | none |
+| Validates query, params, headers | no | yes | yes | yes | no |
+| Works without Mongoose | no | yes | yes | yes | no |
+| TypeScript type inference | manual type argument | automatic | no | no | from the schema |
+| Runs your Mongoose validators | yes, through Mongoose | no | no | no | yes |
+| Edge runtimes | no | yes | yes | no | no |
+
+Defaults can be changed in every library. For example, Zod's `z.strictObject()` rejects unknown keys, and Joi's `convert: false` turns off conversion. The table shows what you get without configuration.
+
+## mongoose-guard vs Zod
+
+**Choose Zod** when the request doesn't look like a model (login, search, webhooks), when you validate query strings and params as well, when you want types inferred automatically, or when you run on the edge.
+
+**Choose mongoose-guard** when the body is a slice of a model and you're tired of writing every rule twice. The Mongoose schema already has `minLength`, `enum` and `match`. mongoose-guard uses them as they are.
+
+Many apps use both: Zod for routes with no model, mongoose-guard for create and update routes. See [When to use it](/when-to-use/).
+
+## mongoose-guard vs Joi
+
+Joi rejects unknown keys by default, like mongoose-guard, but converts types by default, unlike it. Same trade-off as Zod otherwise: Joi validates anything, and you maintain a second schema.
+
+## mongoose-guard vs express-validator
+
+express-validator builds a chain of checks per field, per route: `body("email").isEmail()`. It's flexible and covers query strings and params. But each rule you already wrote in Mongoose has to be written again as a chain. Use `checkExact()` if you want it to reject unknown fields.
+
+## mongoose-guard vs Mongoose on its own
+
+Mongoose validation runs when you save, and it's good at protecting the data in your database. As a check on client input it has gaps:
+
+| Mongoose alone | With mongoose-guard |
+|---|---|
+| `"25"` becomes `25` silently | `invalid_type` |
+| Unknown keys are dropped silently | `unknown_field` |
+| Any schema field can be set from any route | only `allow`ed fields, per route |
+| Update queries skip validators unless you pass `runValidators: true` | the body is checked before you build the query |
+| Errors come back as a `ValidationError` thrown on save | a clean list of issues before your handler runs |
+
+mongoose-guard doesn't replace Mongoose validation. It runs the same validators earlier, on the client's input, with route awareness. Mongoose still validates again when you save.
+
+## What none of these do
+
+No validator replaces authentication, authorization checks on *which record* a user may edit, rate limiting or output escaping. See [Security](/understand/security/).

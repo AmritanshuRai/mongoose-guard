@@ -1,0 +1,158 @@
+---
+title: Nested data
+description: How mongoose-guard validates nested objects, sub-schemas, arrays of sub-schemas, arrays of primitives, Maps and Mixed fields, and how to allow only part of a nested object.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+<div class="answer">
+mongoose-guard walks into every level of the body and checks each nested key against the schema. Allowing a parent field (`"address"`) allows everything inside it. Allowing a child (`"address.city"`) allows only that child. Unknown keys, forbidden keys and wrong types are reported with their full path, such as `address.hacked` or `addresses.1.city`.
+</div>
+
+The examples on this page use this schema:
+
+```ts
+const addressSchema = new Schema(
+  {
+    city: { type: String, required: true },
+    zip: { type: String, match: /^\d{6}$/ },
+  },
+  { _id: false },
+);
+
+const userSchema = new Schema({
+  name: String,
+  profile: {
+    bio: { type: String, maxLength: 160 },
+    website: String,
+  },
+  address: addressSchema,
+  addresses: [addressSchema],
+  tags: [String],
+  scores: { type: Map, of: Number },
+  preferences: Schema.Types.Mixed,
+});
+```
+
+## Plain nested objects
+
+`profile` above is a plain nested object: Mongoose stores it inline, with no schema of its own.
+
+```ts
+guard(User, { allow: ["profile"] });       // profile.bio and profile.website
+guard(User, { allow: ["profile.bio"] });   // only profile.bio
+```
+
+With `allow: ["profile.bio"]`, sending `{ "profile": { "bio": "hi", "website": "a.dev" } }` returns `forbidden_field` at `profile.website`.
+
+A plain nested object must be an object. `"profile": null` and `"profile": "hi"` are both `invalid_type`.
+
+## Sub-schemas
+
+`address` is a sub-schema: a separate `Schema` used as a field type. It behaves the same way for allow lists:
+
+```ts
+guard(User, { allow: ["address"] });       // address.city and address.zip
+guard(User, { allow: ["address.city"] });  // only address.city
+```
+
+Real output for `{ "address": { "city": "Delhi", "hacked": true } }` with `allow: ["address"]`:
+
+```json
+{
+  "ok": false,
+  "issues": [{ "code": "unknown_field", "path": "address.hacked", "message": "Unknown field" }]
+}
+```
+
+And for `{ "address": { "zip": "12" } }` with `allow: ["address"]` and `partial: true`:
+
+```json
+{
+  "ok": false,
+  "issues": [
+    { "code": "invalid_value", "path": "address.zip", "message": "Path `zip` is invalid (12).", "rule": "regexp" }
+  ]
+}
+```
+
+Unlike a plain nested object, a sub-schema may be `null` when it isn't required.
+
+<Aside>
+When a sub-schema is present, its `required` children apply. In full mode, `{ "address": {} }` with `allow: ["address"]` reports `address.city` as required. If the whole `address` is missing and `address` itself isn't required, nothing is reported.
+</Aside>
+
+## Arrays of sub-schemas
+
+`addresses` is a document array. Each element is checked like a sub-schema, and paths include the element's position:
+
+```ts
+guard(User, { allow: ["addresses"] });       // every field of every element
+guard(User, { allow: ["addresses.city"] });  // only city, in every element
+```
+
+| Body | Result |
+|---|---|
+| `{ "addresses": [{ "city": "Delhi" }, { "zip": "411001" }] }` | `invalid_value` at `addresses.1.city` (required) |
+| `{ "addresses": [{ "city": "Pune", "hacked": true }] }` | `unknown_field` at `addresses.0.hacked` |
+| `{ "addresses": ["Delhi"] }` | `invalid_type` at `addresses.0` |
+| `{ "addresses": { "city": "Delhi" } }` | `invalid_type` at `addresses` (expected array) |
+
+## Arrays of primitives
+
+`tags: [String]` holds plain values. Every element's type is checked:
+
+```json
+{
+  "ok": false,
+  "issues": [{ "code": "invalid_type", "path": "tags.1", "message": "Expected string, received number" }]
+}
+```
+
+That's the real output for `{ "tags": ["js", 42] }`. Nested arrays such as `matrix: [[Number]]` work the same way, with paths like `matrix.0.1`. Array-level validators, such as a custom "at most 5 tags" rule, run too.
+
+You can't allow a single position (`"tags.0"`). Allow the whole array.
+
+## Maps
+
+`scores: { type: Map, of: Number }` arrives in JSON as a plain object. Each value is checked against the Map's `of` type, and paths use the key:
+
+| Body | Result |
+|---|---|
+| `{ "scores": { "math": 90 } }` | passes |
+| `{ "scores": { "math": "90" } }` | `invalid_type` at `scores.math` |
+| `{ "scores": { "$where": 1 } }` | `unsafe_key` at `scores.$where` |
+
+Maps of sub-schemas (`{ type: Map, of: addressSchema }`) are walked like any other sub-schema, so `contacts.home.hacked` is reported as unknown.
+
+Map keys can't start with `$` or contain a dot. Mongoose refuses those keys in Maps anyway, and mongoose-guard reports them as `unsafe_key` before Mongoose gets that far.
+
+## Mixed fields
+
+`Schema.Types.Mixed` accepts any JSON value. mongoose-guard can't check its shape, but it still scans every key at every level for unsafe keys. Real output for `{ "preferences": { "filter": { "$where": "sleep(1000)" } } }`:
+
+```json
+{
+  "ok": false,
+  "issues": [
+    { "code": "unsafe_key", "path": "preferences.filter.$where", "message": "Keys starting with $ are not allowed" }
+  ]
+}
+```
+
+To keep this scan cheap, values nested more than 32 levels deep inside a Mixed field are rejected with `invalid_body`.
+
+<Aside type="tip">
+If you know what goes in a Mixed field, give it a real schema instead. You get type checks, per-field allow entries and better errors for free.
+</Aside>
+
+## Summary
+
+| Field | Example | Allow the whole field | Allow part of it |
+|---|---|---|---|
+| plain nested object | `profile: { bio: String }` | `"profile"` | `"profile.bio"` |
+| sub-schema | `address: addressSchema` | `"address"` | `"address.city"` |
+| array of sub-schemas | `addresses: [addressSchema]` | `"addresses"` | `"addresses.city"` |
+| array of primitives | `tags: [String]` | `"tags"` | not possible |
+| Map | `scores: { type: Map, of: Number }` | `"scores"` | not possible |
+| Mixed | `preferences: Mixed` | `"preferences"` | not possible |

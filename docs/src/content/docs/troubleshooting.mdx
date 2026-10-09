@@ -1,0 +1,84 @@
+---
+title: Troubleshooting
+description: Fixes for common mongoose-guard problems, from every request failing with invalid_body to GuardConfigError at startup, numbers rejected as strings, req.validated being undefined and TypeScript import errors.
+---
+
+<div class="answer">
+Most problems come from one of four causes: the body isn't parsed before the guard runs, an allow entry has a typo, the client sends numbers or booleans as strings, or the handler reads `req.body` instead of `req.validated`. Find your symptom below.
+</div>
+
+## Every request fails with "Expected a JSON object"
+
+```json
+{ "code": "invalid_body", "path": "", "message": "Expected a JSON object" }
+```
+
+`req.body` is `undefined` or not an object. In order of likelihood:
+
+1. `app.use(express.json())` is missing, or comes after the route.
+2. The client isn't sending `Content-Type: application/json`, so `express.json()` skips the body.
+3. The client is sending an array or a plain value instead of an object.
+
+## The server won't start: `GuardConfigError`
+
+```text
+GuardConfigError: mongoose-guard: allow entry "adress" does not match the schema ("adress" not found)
+```
+
+An allow entry doesn't match the schema. Check the spelling against the schema, including capitalisation. If the message says `reaches inside "tags", which has no named fields`, the entry points inside an array of primitives, a Map or a Mixed field. Allow the whole field instead. [Allow list paths](/reference/allowlist-paths/).
+
+## Numbers or booleans are rejected
+
+```json
+{ "code": "invalid_type", "path": "age", "message": "Expected number, received string" }
+```
+
+The client sent `"25"` instead of `25`. Fix the client, which is usually the real bug. If the data comes from an HTML form or `FormData`, convert the values before validating. [Strict types](/concepts/strict-types/).
+
+## Dates are rejected
+
+Dates must be ISO 8601 strings, like `"2024-05-01"` or `"2024-05-01T10:20:30Z"`. Timestamps (`1714557630000`) and locale formats (`"05/01/2024"`) are rejected. Send `date.toISOString()` from JavaScript clients.
+
+## A field I allowed is reported as `unknown_field`
+
+The key doesn't exist in the schema at that position. Common causes:
+
+- It's a virtual. Virtuals aren't schema paths.
+- It's nested at a different level than you think. Check `Model.schema.paths` in a REPL.
+- The schema is a discriminator. The guard only sees the base schema. Guard the discriminator model.
+
+## `req.validated` is `undefined`
+
+The handler is running without the guard in front of it. Check that the guard is in the route's middleware list, before the handler, and that you aren't reading `req.validated` in a different route.
+
+## Stripped fields still get saved
+
+The handler saves `req.body`. In strip mode, only `req.validated` is trimmed. Save `req.validated`.
+
+## A required field isn't reported as missing
+
+Either the route uses `partial: true`, where missing fields are allowed by design, or the field isn't in `allow`. Fields outside the allow list are never validated, so the server can fill them in. [Partial updates](/guides/partial-updates/).
+
+## Validation is slow
+
+Look for async validators that query the database, and for `pre("validate")` hooks. Both run on every request that passes the structural checks.
+
+## A 500 instead of a 400
+
+A `pre("validate")` hook or a custom validator threw an error that isn't a validation error. mongoose-guard passes those to `next(error)` rather than hiding them. Fix the hook, or catch the problem inside it and reject properly with `this.invalidate()`.
+
+## TypeScript: cannot find module `mongoose-guard/express`
+
+Update to the latest version and check that `mongoose-guard` is in `dependencies`. The package supports every `moduleResolution` setting, including `node10`. If you see this with a very old TypeScript version, upgrade TypeScript.
+
+## TypeScript: `req.validated` doesn't exist on type `Request`
+
+The type is added when `mongoose-guard/express` is imported somewhere your TypeScript project can see. Make sure at least one file in the project imports it. A route file that uses `guard` is enough.
+
+## The Next.js route fails on Edge
+
+Add `export const runtime = "nodejs"` to the route file. Mongoose can't run on the Edge runtime.
+
+## Still stuck?
+
+Open an issue on [GitHub](https://github.com/AmritanshuRai/mongoose-guard/issues) with your schema, the allow list, the body you sent and the response you got.

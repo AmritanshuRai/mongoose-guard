@@ -1,0 +1,125 @@
+---
+title: Without a framework
+description: Use the framework-free core of mongoose-guard, createGuard and validateBody, in Fastify, Koa, NestJS, queue workers, scripts and tests.
+---
+
+<div class="answer">
+The core import, `mongoose-guard`, has no framework code in it. `createGuard(Model, options)` returns a guard with a `validate(body)` method that resolves to `{ ok: true, data }` or `{ ok: false, issues }`. Use it anywhere you have a parsed object to check: Fastify, Koa, NestJS, queue consumers, CLI scripts, data imports or tests.
+</div>
+
+```ts
+import { createGuard } from "mongoose-guard";
+
+const productGuard = createGuard(Product, { allow: ["name", "price", "stock"] });
+
+const result = await productGuard.validate(body);
+if (result.ok) {
+  await Product.create(result.data);
+} else {
+  console.log(result.issues);
+}
+```
+
+## `createGuard` or `validateBody`?
+
+They run the same validation. The difference is how often the allow list gets compiled:
+
+```ts
+const guard = createGuard(User, options);   // compile once
+await guard.validate(body);                 // validate many times
+
+await validateBody(User, body, options);    // compile and validate in one call
+```
+
+`createGuard` checks your allow list against the schema once and reuses the result. `validateBody` repeats that work on every call. Use `createGuard` for anything that handles requests, and `validateBody` for one-off scripts and tests.
+
+## Fastify
+
+There's no Fastify adapter yet. A `preHandler` hook does the job in a few lines:
+
+```ts
+import { createGuard, type GuardOptions } from "mongoose-guard";
+import type { Model } from "mongoose";
+import type { preHandlerHookHandler } from "fastify";
+
+function fastifyGuard(model: Model<any>, options: GuardOptions): preHandlerHookHandler {
+  const compiled = createGuard(model, options);
+  return async (request, reply) => {
+    const result = await compiled.validate(request.body);
+    if (!result.ok) return reply.code(400).send({ errors: result.issues });
+    request.body = result.data;
+  };
+}
+
+fastify.post("/users", { preHandler: fastifyGuard(User, { allow: ["name", "email"] }) }, createUser);
+```
+
+## Koa
+
+```ts
+function koaGuard(model, options) {
+  const compiled = createGuard(model, options);
+  return async (ctx, next) => {
+    const result = await compiled.validate(ctx.request.body);
+    if (!result.ok) {
+      ctx.status = 400;
+      ctx.body = { errors: result.issues };
+      return;
+    }
+    ctx.state.validated = result.data;
+    await next();
+  };
+}
+```
+
+## NestJS
+
+A pipe fits Nest's model. NestJS injects models through `@InjectModel`, so pass the model in when you create the pipe:
+
+```ts
+import { BadRequestException, type PipeTransform } from "@nestjs/common";
+import { createGuard, type Guard, type GuardOptions } from "mongoose-guard";
+import type { Model } from "mongoose";
+
+export class MongooseGuardPipe implements PipeTransform {
+  private readonly guard: Guard;
+
+  constructor(model: Model<any>, options: GuardOptions) {
+    this.guard = createGuard(model, options);
+  }
+
+  async transform(value: unknown) {
+    const result = await this.guard.validate(value);
+    if (!result.ok) throw new BadRequestException({ errors: result.issues });
+    return result.data;
+  }
+}
+```
+
+There's no NestJS adapter in the package yet, so copy this pipe into your project.
+
+## Queue workers and imports
+
+Job payloads and CSV rows are untrusted input too. A guard works the same way there:
+
+```ts
+const rowGuard = createGuard(Product, { allow: ["sku", "name", "price"] });
+
+for (const row of rows) {
+  const result = await rowGuard.validate(row);
+  if (!result.ok) {
+    report.push({ row, issues: result.issues });
+    continue;
+  }
+  await Product.create(result.data);
+}
+```
+
+CSV values are strings. Convert numbers and booleans before validating. See [Strict types](/concepts/strict-types/).
+
+## Errors
+
+- **Config errors** (a bad allow entry, an unknown `unknown` value): `createGuard` throws a `GuardConfigError` right away. `validateBody` returns a rejected promise with the same error.
+- **Not a model**: passing something without a Mongoose schema throws a `TypeError`.
+- **Validation failures**: never thrown. They come back as `{ ok: false, issues }`.
+- **Anything else** (a `pre("validate")` hook throws, an async validator crashes): `validate()` rejects with that error, so wrap it in `try`/`catch` or let your framework's error handling take it.

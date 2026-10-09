@@ -1,0 +1,90 @@
+---
+title: Partial updates (PATCH)
+description: Use partial mode for PATCH routes so only the fields the client sent are validated, and understand how required fields behave in full and partial mode.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+<div class="answer">
+Set `partial: true` on routes that update some fields of an existing document, usually `PATCH`. In partial mode mongoose-guard validates only the fields the client actually sent, so a missing `required` field is not an error. Without it, every allowed field marked `required` must be in the body, which is what you want when creating a document.
+</div>
+
+```ts
+router.post("/users", guard(User, { allow: ["name", "email", "password"] }), createUser);
+router.patch("/users/:id", guard(User, { allow: ["name", "age"], partial: true }), updateUser);
+```
+
+## The difference, with real output
+
+The User model has `name: { type: String, required: true }` and `age: { type: Number, min: 13 }`. Both routes below allow `["name", "age"]`. Only `partial` changes.
+
+| Body | `partial: false` | `partial: true` |
+|---|---|---|
+| `{ "age": 20 }` | `invalid_value` on `name` (required) | passes |
+| `{ "age": 5 }` | `invalid_value` on `name` (required) and on `age` (min) | `invalid_value` on `age` (min) |
+| `{ "name": "Amrit", "age": 20 }` | passes | passes |
+
+The `{ "age": 5 }` case in partial mode, exactly as returned:
+
+```json
+{
+  "ok": false,
+  "issues": [
+    {
+      "code": "invalid_value",
+      "path": "age",
+      "message": "Path `age` (5) is less than minimum allowed value (13).",
+      "rule": "min"
+    }
+  ]
+}
+```
+
+Everything else still applies in partial mode: unknown fields, forbidden fields, unsafe keys and wrong types are all rejected exactly as before.
+
+## Applying the update
+
+Partial mode only validates. Saving is up to you, and how you save decides what happens to the fields the client didn't send.
+
+```ts
+async function updateUser(req, res) {
+  const user = await User.findByIdAndUpdate(
+    req.params.id,
+    { $set: req.validated },
+    { new: true },
+  );
+  res.json(user);
+}
+```
+
+`$set` with the validated object changes only the sent fields and leaves the rest of the document alone.
+
+<Aside type="caution">
+**Nested objects replace, they don't merge.** With `{ $set: { address: { city: "Pune" } } }`, MongoDB replaces the whole `address`, and any `zip` that was there is gone. If clients should update one nested field, flatten the update to dot paths before saving (`{ "address.city": "Pune" }`) or allow and require the whole object.
+</Aside>
+
+## Why not `runValidators`?
+
+Mongoose can validate update queries with `{ runValidators: true }`. You can use it as well, and it doesn't conflict. But on its own it has the gaps mongoose-guard covers: it casts types, it has no idea which fields this route may change, and only some update operators are validated. mongoose-guard checks the client's input before you build the query.
+
+## Required fields the client can't send
+
+In **either** mode, fields that aren't in `allow` are never checked. A `createdBy` field that is `required` but filled in by your server won't fail validation:
+
+```ts
+router.post("/posts", requireAuth, guard(Post, { allow: ["title", "body"] }), async (req, res) => {
+  const post = await Post.create({ ...req.validated, createdBy: req.user.id });
+  res.status(201).json(post);
+});
+```
+
+The same holds inside sub-schemas and document arrays: with `allow: ["shipping.city"]`, a missing required `shipping.trackingCode` is not reported. Fill it in before you save, or Mongoose's own save-time validation will catch it.
+
+## Choosing a mode
+
+| Route | `partial` |
+|---|---|
+| `POST` that creates a document | `false` (the default) |
+| `PUT` that replaces a whole document | `false` |
+| `PATCH` that changes some fields | `true` |
+| A settings form that always sends every field | either; `false` also checks nothing is missing |

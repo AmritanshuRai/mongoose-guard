@@ -1,0 +1,69 @@
+---
+title: Strict types
+description: Why mongoose-guard never casts values the way Mongoose does, what that means for numbers, booleans and dates in JSON, and what to do when your input really is strings.
+---
+
+<div class="answer">
+mongoose-guard checks that each value already has the right JavaScript type and never converts it. A Number field needs a JSON number, so `"25"` is rejected with `invalid_type`. Mongoose itself would cast `"25"` to `25` without complaint. The strictness is on purpose: at an API boundary, a wrong type almost always means a bug in the client, and casting hides it.
+</div>
+
+## What Mongoose does on its own
+
+Mongoose was designed to be forgiving. Its casting rules turn many inputs into the type a field expects:
+
+| Field type | Mongoose accepts | Stores |
+|---|---|---|
+| Number | `"25"` | `25` |
+| Boolean | `"false"`, `0`, `"no"` | `false` |
+| String | `25` | `"25"` |
+| Date | `1700000000000` | a Date |
+
+That's handy when you're writing data from your own code. It's a trap when the data comes from a client. A mobile app that sends `"age": "25"` works today. When someone later adds a check like `typeof req.body.age === "number"` somewhere else in the code, it quietly breaks, and nobody knows why the same request used to work.
+
+## What mongoose-guard accepts instead
+
+| Field type | Accepts | Rejects (examples) |
+|---|---|---|
+| String | strings | `25`, `true`, `{}` |
+| Number | finite numbers | `"25"`, `NaN`, `Infinity` |
+| Boolean | `true`, `false` | `"true"`, `0`, `1` |
+| Date | ISO 8601 strings like `"2024-05-01"` or `"2024-05-01T10:00:00Z"`, or a `Date` object | `"yesterday"`, `1700000000000` |
+| ObjectId | 24-character hex strings, or an `ObjectId` | `"123"` |
+
+Dates and ObjectIds arrive as strings because JSON has no date or ObjectId type, so those strings are the expected format, not a cast. [Type rules](/reference/type-rules/) has the full table, including Decimal128, BigInt, Int32, Double, UUID, Buffer and Mixed.
+
+## `null` is allowed
+
+`null` is a real JSON value, and Mongoose stores it fine. mongoose-guard accepts `null` for any field except plain nested objects. If the field is `required`, Mongoose's own `required` rule rejects it in the next step:
+
+```json
+{ "code": "invalid_value", "path": "name", "message": "Path `name` is required.", "rule": "required" }
+```
+
+## When your input really is strings
+
+HTML forms, `FormData`, `URLSearchParams` and CSV imports give you strings for everything. mongoose-guard won't convert them, so convert first and then validate:
+
+```ts
+const raw = Object.fromEntries(formData);
+const body = {
+  name: raw.name,
+  age: raw.age === "" ? undefined : Number(raw.age),
+  newsletter: raw.newsletter === "on",
+};
+const result = await signupGuard.validate(body);
+```
+
+If you have a lot of string-only input, a validator with built-in coercion may be a better fit for those routes. See [When to use it](/when-to-use/).
+
+## The data you get back is not cast either
+
+When validation passes, `req.validated` (or `result.data`) contains your input exactly as it arrived, minus any fields that were stripped. Defaults and setters are **not** applied:
+
+```ts
+// schema: email: { type: String, lowercase: true }
+// body:   { "email": "AMRIT@EXAMPLE.COM", ... }
+// result.data.email === "AMRIT@EXAMPLE.COM"
+```
+
+Mongoose applies `lowercase`, `trim`, defaults and other setters when you call `User.create(result.data)` or `save()`, the same as always. A date string stays a string until Mongoose saves it as a Date.

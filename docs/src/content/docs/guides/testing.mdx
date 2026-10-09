@@ -1,0 +1,101 @@
+---
+title: Testing
+description: Test mongoose-guard allow lists and validation without a database, test Express routes end to end, and catch allow-list typos in CI.
+---
+
+<div class="answer">
+mongoose-guard doesn't need a database connection to validate, so you can unit-test your allow lists with plain function calls: create a guard, pass it a body, and assert on `ok`, `data` and `issues`. For full routes, send real HTTP requests to your Express app. The only exception is custom async validators that query MongoDB, which still need a database or a mock.
+</div>
+
+## Unit test an allow list
+
+Most bugs live in allow lists: a sensitive field left in, or a needed field left out. Test both directions:
+
+```ts
+import { describe, expect, it } from "vitest";
+import { createGuard } from "mongoose-guard";
+import { User } from "../src/models/user.js";
+
+const signupGuard = createGuard(User, { allow: ["name", "email", "password"] });
+
+describe("signup body", () => {
+  it("accepts a normal signup", async () => {
+    const result = await signupGuard.validate({
+      name: "Amrit",
+      email: "amrit@example.com",
+      password: "correct-horse",
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it.each(["role", "credits", "isVerified"])("refuses %s", async (field) => {
+    const result = await signupGuard.validate({
+      name: "Amrit",
+      email: "amrit@example.com",
+      password: "correct-horse",
+      [field]: "x",
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [{ code: "forbidden_field", path: field }],
+    });
+  });
+});
+```
+
+These run in milliseconds and need no MongoDB.
+
+## Test a route end to end
+
+Start the app on a random port and send real requests. This example uses Node's built-in `fetch`, but `supertest` works just as well:
+
+```ts
+import type { AddressInfo } from "node:net";
+import { afterAll, beforeAll, expect, it } from "vitest";
+import { app } from "../src/app.js";
+
+let server: ReturnType<typeof app.listen>;
+let baseUrl: string;
+
+beforeAll(() => {
+  server = app.listen(0);
+  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+});
+
+afterAll(() => server.close());
+
+it("rejects a forbidden field with a 400", async () => {
+  const response = await fetch(`${baseUrl}/signup`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "Amrit", email: "a@b.co", password: "correct-horse", role: "admin" }),
+  });
+
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({
+    errors: [{ code: "forbidden_field", path: "role", message: "Field is not allowed" }],
+  });
+});
+```
+
+If your handler saves to MongoDB, valid requests will need a test database such as `mongodb-memory-server`. Invalid ones never reach the handler, so they don't.
+
+## Catch allow-list typos in CI
+
+Allow lists are checked against the schema when a guard is created, which normally happens when route files load. Importing your app in any test is enough to catch a typo:
+
+```ts
+it("loads every route", async () => {
+  await expect(import("../src/app.js")).resolves.toBeDefined();
+});
+```
+
+A typo fails that test with a message like:
+
+```text
+GuardConfigError: mongoose-guard: allow entry "adress" does not match the schema ("adress" not found)
+```
+
+## Async validators
+
+Custom async validators run during validation. If one queries MongoDB, for example to check that a username is free, tests that hit it need a database or a stubbed model method. Validators that don't touch the database need nothing special.

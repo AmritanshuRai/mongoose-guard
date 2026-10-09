@@ -1,0 +1,27 @@
+:root {
+  --sl-color-accent-low: #0b3d22;
+  --sl-color-accent: #13aa52;
+  --sl-color-accent-high: #b8f0cf;
+}
+
+:root[data-theme="light"] {
+  --sl-color-accent-low: #c9f2da;
+  --sl-color-accent: #0e7a3b;
+  --sl-color-accent-high: #0a3d1f;
+}
+
+.answer {
+  border-inline-start: 4px solid var(--sl-color-accent);
+  background: var(--sl-color-gray-6);
+  border-radius: 0 0.5rem 0.5rem 0;
+  padding: 0.875rem 1rem;
+  font-size: var(--sl-text-lg);
+}
+
+.answer > :first-child {
+  margin-top: 0;
+}
+
+.answer > :last-child {
+  margin-bottom: 0;
+}

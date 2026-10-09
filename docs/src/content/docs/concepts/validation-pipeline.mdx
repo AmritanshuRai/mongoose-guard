@@ -1,0 +1,83 @@
+---
+title: How validation works
+description: The five checks mongoose-guard runs on every request body, in order, what each one catches, and why structural problems stop the request before Mongoose rules run.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+<div class="answer">
+Every request body goes through five checks, in this order: the body must be a plain object, it must not contain unsafe keys, every key must exist in the schema and be allowed on this route, every value must have exactly the right type, and finally the Mongoose rules in your schema must pass. If any of the first four checks fail, mongoose-guard returns those issues straight away and does not run the Mongoose rules.
+</div>
+
+```text
+body
+ │
+ ├─ 1. Is it a plain object?                  invalid_body
+ ├─ 2. Any unsafe keys?                       unsafe_key
+ ├─ 3. Is every key in the schema and allowed? unknown_field, forbidden_field
+ ├─ 4. Is every value the right type?         invalid_type
+ │        (stop here if anything above failed)
+ └─ 5. Do the schema's rules pass?            invalid_value
+```
+
+## 1. The body is a plain object
+
+The body has to be a JSON object: `{ ... }`. Arrays, strings, numbers, `null` and a missing body all fail.
+
+```json
+{ "code": "invalid_body", "path": "", "message": "Expected a JSON object" }
+```
+
+In Express, the usual cause of a missing body is forgetting `app.use(express.json())`.
+
+## 2. No unsafe keys
+
+Some keys are never accepted, anywhere in the body:
+
+- `__proto__`, `constructor` and `prototype`, which are used in prototype pollution attacks
+- keys starting with `$`, such as `$where`, `$gt` or `$set`, which are MongoDB operators
+- keys containing a dot, such as `"address.city"`, which MongoDB treats as a path into a nested object
+
+This check goes all the way down, including inside `Mixed` fields and Map keys. It also applies in strip mode: unsafe keys are always errors, never silently removed. The [security page](/understand/security/) explains why.
+
+## 3. Every key is known and allowed
+
+Each key is looked up in the schema.
+
+- Not in the schema at all: `unknown_field`. Usually a typo like `nmae`, or a client sending fields from a newer API version.
+- In the schema, but not in this route's `allow` list: `forbidden_field`. This is the mass-assignment check.
+
+In [strip mode](/guides/strip-mode/), both of these are removed quietly instead of being reported.
+
+## 4. Every value has exactly the right type
+
+A Number field needs a real JSON number. A String field needs a string. Nothing is converted. `"25"` for a Number is an `invalid_type` issue, even though Mongoose would happily cast it.
+
+This also walks into nested objects, sub-schemas, arrays and Maps, so `tags: ["js", 42]` reports `tags.1`. The full list of rules is in [Type rules](/reference/type-rules/).
+
+## 5. The schema's own rules pass
+
+Only when the first four checks are clean does mongoose-guard ask Mongoose to validate. This is where `required`, `min`, `max`, `minLength`, `maxLength`, `enum`, `match` and your custom validators run, including async ones.
+
+Mongoose runs these rules itself. mongoose-guard doesn't reimplement them, so they behave exactly as they do when you call `save()`.
+
+## Why stop before step 5?
+
+Running Mongoose rules on a body with the wrong shape produces noise. If `age` is the string `"abc"`, a `min: 13` check has nothing sensible to say. If there's a forbidden `role` field, there's no point checking whether its value is in the enum. Reporting the structural problems first gives the client one clear thing to fix.
+
+It also saves work. An async validator that queries the database never runs on a request that was going to fail anyway.
+
+<Aside type="note">
+mongoose-guard reports **every** issue it finds, not just the first. Steps 2, 3 and 4 happen in a single pass over the body, so one response can mix `unsafe_key`, `unknown_field`, `forbidden_field` and `invalid_type` issues. They're listed in the order their keys appear in the body.
+</Aside>
+
+## Which fields does step 5 check?
+
+That depends on `partial`:
+
+| Mode | Fields Mongoose validates |
+|---|---|
+| default (`partial: false`) | every field that was sent, **plus** every allowed field that wasn't sent, so `required` works |
+| `partial: true` | only the fields that were sent |
+
+Fields that are not in the allow list are never validated. A `required` field like `createdBy`, which your server fills in, won't fail just because the client can't send it. More on this in [Partial updates](/guides/partial-updates/).

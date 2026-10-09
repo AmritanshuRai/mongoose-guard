@@ -1,0 +1,19 @@
+---
+title: Changelog
+description: Release history of mongoose-guard.
+---
+
+<div class="answer">
+mongoose-guard follows semantic versioning. Before 1.0, minor versions (0.x) may include breaking changes, and each one is listed here.
+</div>
+
+## 0.1.0
+
+First release.
+
+- `createGuard` and `validateBody` validate a request body against a Mongoose model with a per-route `allow` list.
+- Strict type checks with no casting for every built-in SchemaType, including arrays, Maps and sub-schemas.
+- `__proto__`, `constructor`, `prototype`, `$` and dotted keys are rejected anywhere in the body.
+- `partial` mode for PATCH routes and `unknown: "strip"` for lenient routes.
+- Express adapter (`mongoose-guard/express`) and Web `Request` adapter (`mongoose-guard/web`).
+- Tested against Mongoose 8 and 9, and Express 4 and 5.

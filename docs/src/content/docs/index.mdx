@@ -1,0 +1,82 @@
+---
+title: Mongoose request body validation for Express and Node.js
+description: Validate Express and Node.js request bodies against the Mongoose schema you already have. Per-route field allowlists, strict types without casting, and your schema's own rules.
+template: splash
+hero:
+  title: mongoose-guard
+  tagline: Validate request bodies with the Mongoose schema you already have. Pick the fields each route accepts, and everything else gets rejected.
+  image:
+    file: ../../assets/logo.svg
+  actions:
+    - text: Quick start
+      link: /mongoose-guard/quick-start/
+      icon: right-arrow
+    - text: What is it?
+      link: /mongoose-guard/introduction/
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components";
+
+<div class="answer">
+**mongoose-guard** is a small TypeScript library for Node.js. It checks an incoming request body against an existing Mongoose model before your route code runs. You tell it which fields a route accepts. It rejects unknown fields, fields the route doesn't allow, wrong types and anything your Mongoose rules reject, and it tells the client exactly what was wrong.
+</div>
+
+```ts
+import { guard } from "mongoose-guard/express";
+
+app.post("/signup", guard(User, { allow: ["name", "email", "password"] }), signup);
+```
+
+Send `{ "name": "Amrit", "email": "amrit@example.com", "password": "correct-horse", "role": "admin" }` to that route and it never reaches `signup`. The client gets a 400:
+
+```json
+{
+  "errors": [{ "code": "forbidden_field", "path": "role", "message": "Field is not allowed" }]
+}
+```
+
+## What it does
+
+<CardGrid>
+  <Card title="One schema, not two" icon="document">
+    Your Mongoose schema stays the source of truth. You don't copy its rules into Zod or Joi.
+  </Card>
+  <Card title="Stops mass assignment" icon="warning">
+    Each route lists the fields it accepts. `role`, `credits` or `isVerified` can't sneak in through a signup form.
+  </Card>
+  <Card title="Strict types" icon="approve-check">
+    `"25"` is not a number. Mongoose would cast it quietly. mongoose-guard reports it.
+  </Card>
+  <Card title="Blocks injection keys" icon="seti:lock">
+    `__proto__`, `$where`, `$gt` and dotted keys are rejected anywhere in the body.
+  </Card>
+</CardGrid>
+
+## What it is not
+
+- **Not a replacement for Zod everywhere.** It validates JSON bodies that map onto a Mongoose model. Query strings, headers, route params and request shapes with no model behind them need another tool. See [When to use it](/when-to-use/).
+- **Not authentication or authorization.** It checks *what* was sent, not *who* sent it.
+- **Not an edge-runtime library.** Mongoose needs Node.js, so mongoose-guard does too.
+
+## Where to go next
+
+<CardGrid>
+  <LinkCard title="Quick start" description="A working Express route in five minutes, from an empty folder." href="/quick-start/" />
+  <LinkCard title="When to use it (and when not to)" description="An honest guide to whether this fits your project." href="/when-to-use/" />
+  <LinkCard title="How validation works" description="The five checks every request goes through, in order." href="/concepts/validation-pipeline/" />
+  <LinkCard title="FAQ" description="Short answers to the questions people ask first." href="/faq/" />
+</CardGrid>
+
+## At a glance
+
+| | |
+|---|---|
+| Package | `mongoose-guard` on npm |
+| License | MIT |
+| Runtime | Node.js 20 or newer |
+| Mongoose | 8 and 9 |
+| Express | 4 and 5 |
+| Other frameworks | anything that gives you a standard `Request` (Next.js, Hono, Remix, React Router, SvelteKit) |
+| Module formats | ESM and CommonJS, with TypeScript types |
+| Runtime dependencies | none |

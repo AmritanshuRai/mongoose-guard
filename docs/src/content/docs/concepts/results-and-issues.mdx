@@ -1,0 +1,108 @@
+---
+title: Results and issues
+description: The shape of a mongoose-guard result, what each field of an issue means, how paths are written for nested data and arrays, and how to show issues to users.
+---
+
+<div class="answer">
+Validating a body gives you a result object. When it passes, the result is `{ ok: true, data }`, where `data` is the accepted input. When it fails, it's `{ ok: false, issues }`, where `issues` is an array with one entry per problem. Each issue has a `code` saying what kind of problem it is, a `path` saying where, a human-readable `message`, and for Mongoose rule failures, a `rule` naming the validator.
+</div>
+
+## The result
+
+```ts
+type GuardResult<TData = Record<string, unknown>> =
+  | { ok: true; data: TData }
+  | { ok: false; issues: Issue[] };
+```
+
+Check `ok` first. TypeScript then knows which of the two shapes you have:
+
+```ts
+const result = await signupGuard.validate(body);
+
+if (!result.ok) {
+  return res.status(400).json({ errors: result.issues });
+}
+
+await User.create(result.data);
+```
+
+The Express adapter does this for you. Valid data goes to `req.validated`, and issues become a 400 response.
+
+## An issue
+
+```ts
+interface Issue {
+  code: IssueCode;
+  path: string;
+  message: string;
+  rule?: string;
+}
+```
+
+| Field | Example | Meaning |
+|---|---|---|
+| `code` | `"forbidden_field"` | The kind of problem. One of six fixed values, listed below. Safe to branch on in code. |
+| `path` | `"addresses.1.city"` | Where in the body the problem is. `""` means the body itself. |
+| `message` | `"Field is not allowed"` | A human-readable description, in English. Fine for logs and developer-facing APIs. |
+| `rule` | `"minlength"` | Only on `invalid_value` issues: which Mongoose validator failed. |
+
+### Codes
+
+| Code | Means | Example message |
+|---|---|---|
+| `invalid_body` | the body isn't a JSON object | `Expected a JSON object` |
+| `unsafe_key` | a prototype key, `$` key or dotted key | `Keys starting with $ are not allowed` |
+| `unknown_field` | the key isn't in the schema | `Unknown field` |
+| `forbidden_field` | the key is in the schema but not in `allow` | `Field is not allowed` |
+| `invalid_type` | the value has the wrong JavaScript type | `Expected number, received string` |
+| `invalid_value` | a Mongoose validator rejected the value | Path \`age\` (5) is less than minimum allowed value (13). |
+
+[Issue codes](/reference/issue-codes/) lists every message each code can produce.
+
+## Paths
+
+Paths use dots between levels and numbers for array positions, the same style Mongoose uses in its own errors.
+
+| Body | Problem | Path |
+|---|---|---|
+| `{ "nmae": "Amrit" }` | typo at the top level | `nmae` |
+| `{ "address": { "city": "Delhi", "hacked": true } }` | unknown key inside a sub-schema | `address.hacked` |
+| `{ "tags": ["js", 42] }` | second array element is a number | `tags.1` |
+| `{ "addresses": [{ "city": "Delhi" }, {}] }` | second address has no city | `addresses.1.city` |
+| `[ ... ]` | the body is an array | `""` |
+
+## Showing issues to people
+
+`message` is written for developers. For a form shown to end users, map `code`, `path` and `rule` to your own text:
+
+```ts
+const labels: Record<string, string> = { name: "Name", email: "Email", password: "Password" };
+
+function toFormErrors(issues: Issue[]) {
+  const errors: Record<string, string> = {};
+  for (const issue of issues) {
+    const label = labels[issue.path] ?? issue.path;
+    if (issue.rule === "required") errors[issue.path] = `${label} is required`;
+    else if (issue.rule === "minlength") errors[issue.path] = `${label} is too short`;
+    else errors[issue.path] = `${label} is invalid`;
+  }
+  return errors;
+}
+```
+
+You can also set friendlier messages directly in your Mongoose schema, and mongoose-guard passes them through unchanged:
+
+```ts
+name: { type: String, minLength: [2, "Name must be at least 2 characters"] },
+```
+
+```json
+{ "code": "invalid_value", "path": "name", "message": "Name must be at least 2 characters", "rule": "minlength" }
+```
+
+## What `data` contains
+
+`data` is a new object holding exactly the fields that were accepted, with their original values. Nothing is cast, no defaults are added, and setters such as `lowercase` haven't run yet. In reject mode, `data` has the same content as the body you passed in. In strip mode, the unknown and forbidden fields are gone.
+
+Your input object is never modified.

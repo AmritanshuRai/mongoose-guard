@@ -1,0 +1,169 @@
+---
+title: Quick start
+description: Build a working Express signup route protected by mongoose-guard, step by step from an empty folder, and see the exact responses for valid and invalid requests.
+---
+
+import { Steps, Aside } from "@astrojs/starlight/components";
+
+<div class="answer">
+This page builds a small Express API with one route protected by mongoose-guard. It takes about five minutes. You don't need MongoDB running, because validation happens in memory. You only need Node.js 20 or newer.
+</div>
+
+<Steps>
+
+1. **Create a project and install the packages**
+
+   ```bash
+   mkdir guard-demo && cd guard-demo
+   npm init -y
+   npm pkg set type=module
+   npm install express mongoose mongoose-guard
+   ```
+
+   `npm pkg set type=module` lets you use `import` syntax in plain `.js` files.
+
+2. **Write a model**
+
+   Create `user.js`. This is a normal Mongoose model. Nothing in it is specific to mongoose-guard.
+
+   ```js title="user.js"
+   import mongoose from "mongoose";
+
+   const userSchema = new mongoose.Schema({
+     name: { type: String, required: true, minLength: 2 },
+     email: { type: String, required: true, lowercase: true },
+     password: { type: String, required: true, minLength: 8 },
+     age: { type: Number, min: 13 },
+     role: { type: String, enum: ["user", "admin"], default: "user" },
+     credits: { type: Number, default: 0 },
+   });
+
+   export const User = mongoose.model("User", userSchema);
+   ```
+
+3. **Write the server**
+
+   Create `server.js`:
+
+   ```js title="server.js"
+   import express from "express";
+   import { guard } from "mongoose-guard/express";
+   import { User } from "./user.js";
+
+   const app = express();
+   app.use(express.json());
+
+   app.post(
+     "/signup",
+     guard(User, { allow: ["name", "email", "password", "age"] }),
+     (req, res) => {
+       res.status(201).json({ received: req.validated });
+     },
+   );
+
+   app.listen(3000, () => console.log("Listening on http://localhost:3000"));
+   ```
+
+   Two things to notice:
+
+   - `express.json()` must come **before** the guard. It turns the raw request into `req.body`. Without it, every request fails with `invalid_body`.
+   - The handler reads `req.validated`, not `req.body`. `req.validated` holds only the fields that passed.
+
+4. **Start it**
+
+   ```bash
+   node server.js
+   ```
+
+5. **Send a valid request**
+
+   In a second terminal:
+
+   ```bash
+   curl -s -X POST localhost:3000/signup \
+     -H 'content-type: application/json' \
+     -d '{"name":"Amrit","email":"amrit@example.com","password":"correct-horse","age":25}'
+   ```
+
+   ```json
+   {"received":{"name":"Amrit","email":"amrit@example.com","password":"correct-horse","age":25}}
+   ```
+
+6. **Try to make yourself an admin**
+
+   ```bash
+   curl -s -X POST localhost:3000/signup \
+     -H 'content-type: application/json' \
+     -d '{"name":"Amrit","email":"amrit@example.com","password":"correct-horse","role":"admin","credits":99999}'
+   ```
+
+   ```json
+   {"errors":[{"code":"forbidden_field","path":"role","message":"Field is not allowed"},{"code":"forbidden_field","path":"credits","message":"Field is not allowed"}]}
+   ```
+
+   The status is `400 Bad Request` and the handler never ran. `role` and `credits` are real fields in the schema, but this route didn't allow them.
+
+7. **Send a number as a string**
+
+   ```bash
+   curl -s -X POST localhost:3000/signup \
+     -H 'content-type: application/json' \
+     -d '{"name":"Amrit","email":"amrit@example.com","password":"correct-horse","age":"25"}'
+   ```
+
+   ```json
+   {"errors":[{"code":"invalid_type","path":"age","message":"Expected number, received string"}]}
+   ```
+
+   Mongoose on its own would have quietly turned `"25"` into `25`. mongoose-guard treats it as a client bug and says so.
+
+8. **Break the schema's own rules**
+
+   ```bash
+   curl -s -X POST localhost:3000/signup \
+     -H 'content-type: application/json' \
+     -d '{"name":"A","password":"123"}'
+   ```
+
+   ```json
+   {"errors":[{"code":"invalid_value","path":"email","message":"Path `email` is required.","rule":"required"},{"code":"invalid_value","path":"name","message":"Path `name` (`A`, length 1) is shorter than the minimum allowed length (2).","rule":"minlength"},{"code":"invalid_value","path":"password","message":"Path `password` (`123`, length 3) is shorter than the minimum allowed length (8).","rule":"minlength"}]}
+   ```
+
+   These rules came straight from `user.js`. You didn't write them twice.
+
+</Steps>
+
+## Saving to MongoDB
+
+Once you connect to a database, save `req.validated` exactly as you would have saved `req.body`:
+
+```js
+await mongoose.connect(process.env.MONGODB_URI);
+
+app.post(
+  "/signup",
+  guard(User, { allow: ["name", "email", "password", "age"] }),
+  async (req, res) => {
+    const user = await User.create(req.validated);
+    res.status(201).json({ id: user.id });
+  },
+);
+```
+
+<Aside type="caution">
+Hash passwords before saving them. mongoose-guard checks the shape of the data. It doesn't hash, sanitize or transform anything.
+</Aside>
+
+## What you learned
+
+- `guard(Model, { allow })` goes between `express.json()` and your handler.
+- `allow` lists the fields this route accepts. Everything else in the schema is off limits for this route.
+- Bad requests get a `400` with an `errors` array. Each error has a `code`, a `path` and a `message`.
+- Good requests reach your handler with the checked data on `req.validated`.
+
+## Next steps
+
+- [When to use it](/when-to-use/): decide whether mongoose-guard fits your project.
+- [Partial updates](/guides/partial-updates/): set up a `PATCH` route.
+- [Nested data](/guides/nested-data/): allow `address.city` but not `address.zip`.
+- [Custom error responses](/guides/custom-errors/): change the 400 response shape.

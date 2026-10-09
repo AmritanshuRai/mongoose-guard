@@ -1,0 +1,100 @@
+---
+title: FAQ
+description: Short, direct answers to the most common questions about mongoose-guard, what it is, how it compares to Zod, which frameworks it supports, and how it behaves.
+---
+
+<div class="answer">
+Quick answers to the questions people ask most about mongoose-guard. Each answer links to the page with the full detail.
+</div>
+
+## What is mongoose-guard?
+
+mongoose-guard is an MIT-licensed npm package that validates HTTP request bodies against an existing Mongoose model. For each route you list the fields it accepts. It rejects everything else, checks types strictly and runs your schema's own validators before your handler runs. [Introduction](/introduction/).
+
+## What problem does mongoose-guard solve?
+
+It stops mass assignment, where a client sets fields like `role` or `credits` that a route was never meant to change, and it removes the need to copy your Mongoose rules into a second schema in Zod or Joi.
+
+## Does mongoose-guard replace Zod?
+
+No. It covers request bodies that map onto a Mongoose model. Zod is still the better choice for login forms, search requests, query strings, route params, webhooks and anything without a model. Many apps use both. [Comparison](/understand/comparison/).
+
+## Do I still need Mongoose validation if I use mongoose-guard?
+
+Yes, and you keep it automatically. mongoose-guard runs your Mongoose validators on the incoming body, and Mongoose runs them again when you save. Nothing in your schema changes.
+
+## Which frameworks does mongoose-guard support?
+
+Express 4 and 5 through `mongoose-guard/express`. Next.js route handlers, Hono, Remix, React Router and SvelteKit through `mongoose-guard/web`, which takes a standard `Request`. Fastify, Koa, NestJS and anything else through the core `createGuard` function, with a few lines of glue. [Without a framework](/guides/without-a-framework/).
+
+## Which versions of Mongoose and Node.js are supported?
+
+Mongoose 8 and 9, and Node.js 20 or newer. Every test runs against both Mongoose versions.
+
+## Does mongoose-guard need a database connection?
+
+No. Validation happens in memory on a throwaway document, so it works in tests without MongoDB. The only exception is your own async validators that query the database.
+
+## Does mongoose-guard convert "25" to 25?
+
+No. It never converts types. `"25"` for a Number field is an `invalid_type` issue. Mongoose on its own would convert it, which hides client bugs. [Strict types](/concepts/strict-types/).
+
+## What happens to fields that aren't in the allow list?
+
+By default the request fails with a `forbidden_field` issue for each one. With `unknown: "strip"`, they're removed and the request continues. [Strip mode](/guides/strip-mode/).
+
+## How do I validate a PATCH request?
+
+Add `partial: true`. Only the fields the client sent are validated, so missing required fields aren't errors. [Partial updates](/guides/partial-updates/).
+
+## Can I allow only part of a nested object?
+
+Yes. `allow: ["address.city"]` accepts `address.city` and rejects `address.zip`. For arrays of sub-schemas, `"addresses.city"` applies to every element. [Nested data](/guides/nested-data/).
+
+## Does mongoose-guard validate query strings or route params?
+
+No, only request bodies. Use Zod, Joi or express-validator for `req.query` and `req.params`.
+
+## Does mongoose-guard protect against NoSQL injection?
+
+For request bodies, yes. Typed fields reject objects such as `{ "$ne": null }`, and keys starting with `$` are rejected anywhere in the body, including inside Mixed fields. It doesn't look at query strings. [Security](/understand/security/).
+
+## Does mongoose-guard check who is allowed to edit a record?
+
+No. It checks which fields a request contains, not who sent it or which document they're editing. Authentication and ownership checks are still your job. You can pick a different guard per role. [Express](/guides/express/).
+
+## Why is req.validated different from req.body?
+
+`req.validated` only holds the fields that passed validation. In strip mode, `req.body` still contains the stripped fields. Always save `req.validated`.
+
+## Does mongoose-guard apply defaults, setters or lowercase?
+
+No. The returned data is your input as received. Mongoose applies defaults and setters when you call `create()` or `save()`.
+
+## Does mongoose-guard work with TypeScript?
+
+Yes. It's written in TypeScript and ships its own types, for ESM and CommonJS, and for every `moduleResolution` setting. [TypeScript](/guides/typescript/).
+
+## Does mongoose-guard run on Cloudflare Workers or Vercel Edge?
+
+No. Mongoose needs Node.js and a TCP connection to MongoDB, which edge runtimes don't provide. Use the Node.js runtime.
+
+## Does mongoose-guard support discriminators?
+
+Not yet. Guard the concrete discriminator model instead of the base model.
+
+## What does a validation error look like?
+
+An array of issues, each with a `code`, a `path` and a `message`, plus a `rule` for Mongoose validator failures. In Express the default response is `400` with `{ "errors": [...] }`. [Results and issues](/concepts/results-and-issues/).
+
+## Can I change the error response format?
+
+Yes. In Express, pass `onInvalid`. In web frameworks, build any response from `result.issues`. [Custom error responses](/guides/custom-errors/).
+
+## Is mongoose-guard production ready?
+
+Version 0.1.0 is the first release. It has a full test suite against Mongoose 8 and 9, and Express 4 and 5, but it hasn't had wide production use yet. Pin the version and read the [changelog](/changelog/) before upgrading.
+
+## Who maintains mongoose-guard?
+
+Amritanshu Rai. The source is on [GitHub](https://github.com/AmritanshuRai/mongoose-guard).

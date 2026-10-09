@@ -1,0 +1,160 @@
+---
+title: Next.js, Hono, Remix and SvelteKit
+description: Use mongoose-guard/web with any framework that gives you a standard Request object, with examples for Next.js route handlers, Hono, Remix or React Router actions, and SvelteKit endpoints.
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+<div class="answer">
+Frameworks built on web standards give you a `Request` object instead of Express's `req`. For those, import `guard` from `mongoose-guard/web`. It returns a function that takes a `Request`, reads its JSON body, and resolves to `{ ok: true, data }` or `{ ok: false, issues }`. `invalidResponse(issues)` turns the issues into a ready-made `400` response.
+</div>
+
+```ts
+import { guard, invalidResponse } from "mongoose-guard/web";
+
+const validateSignup = guard(User, { allow: ["name", "email", "password"] });
+
+const result = await validateSignup(request);
+if (!result.ok) return invalidResponse(result.issues);
+// result.data is safe to save
+```
+
+Create the guard once, at module level, not inside the handler.
+
+## Framework examples
+
+<Tabs syncKey="framework">
+  <TabItem label="Next.js">
+    ```ts title="app/api/users/route.ts"
+    import { guard, invalidResponse } from "mongoose-guard/web";
+    import { connectDb } from "@/lib/db";
+    import { User } from "@/models/user";
+
+    export const runtime = "nodejs";
+
+    const validateUser = guard(User, { allow: ["name", "email", "password"] });
+
+    export async function POST(request: Request) {
+      const result = await validateUser(request);
+      if (!result.ok) return invalidResponse(result.issues);
+
+      await connectDb();
+      const user = await User.create(result.data);
+      return Response.json({ id: user.id }, { status: 201 });
+    }
+    ```
+
+    `export const runtime = "nodejs"` matters if your project defaults to the Edge runtime. Mongoose can't run on Edge.
+  </TabItem>
+  <TabItem label="Hono">
+    ```ts
+    import { Hono } from "hono";
+    import { guard, invalidResponse } from "mongoose-guard/web";
+    import { User } from "./models/user.js";
+
+    const app = new Hono();
+    const validateUser = guard(User, { allow: ["name", "email", "password"] });
+
+    app.post("/users", async (c) => {
+      const result = await validateUser(c.req.raw);
+      if (!result.ok) return invalidResponse(result.issues);
+
+      const user = await User.create(result.data);
+      return c.json({ id: user.id }, 201);
+    });
+    ```
+
+    `c.req.raw` is the underlying standard `Request`. Run Hono on Node.js (`@hono/node-server`), not on Cloudflare Workers.
+  </TabItem>
+  <TabItem label="Remix / React Router">
+    ```ts title="app/routes/users.ts"
+    import { guard, invalidResponse } from "mongoose-guard/web";
+    import { User } from "~/models/user.server";
+
+    const validateUser = guard(User, { allow: ["name", "email", "password"] });
+
+    export async function action({ request }: { request: Request }) {
+      const result = await validateUser(request);
+      if (!result.ok) return invalidResponse(result.issues);
+
+      const user = await User.create(result.data);
+      return Response.json({ id: user.id }, { status: 201 });
+    }
+    ```
+
+    This is for actions that receive JSON (`fetch` with a JSON body, or `useFetcher().submit(data, { encType: "application/json" })`). Regular `<Form>` posts send form data. See below.
+  </TabItem>
+  <TabItem label="SvelteKit">
+    ```ts title="src/routes/api/users/+server.ts"
+    import { guard, invalidResponse } from "mongoose-guard/web";
+    import { User } from "$lib/server/models/user";
+
+    const validateUser = guard(User, { allow: ["name", "email", "password"] });
+
+    export async function POST({ request }) {
+      const result = await validateUser(request);
+      if (!result.ok) return invalidResponse(result.issues);
+
+      const user = await User.create(result.data);
+      return Response.json({ id: user.id }, { status: 201 });
+    }
+    ```
+  </TabItem>
+</Tabs>
+
+## Malformed JSON
+
+If the body isn't valid JSON, or is empty, the guard doesn't throw. It resolves to:
+
+```json
+{
+  "ok": false,
+  "issues": [{ "code": "invalid_body", "path": "", "message": "Request body must be valid JSON" }]
+}
+```
+
+The guard doesn't check the `Content-Type` header. It tries to parse the body as JSON either way.
+
+## The body can only be read once
+
+A `Request` body is a stream, and reading it uses it up. After the guard has read it, `request.json()` will fail. If you need the raw body as well, for logging or a signature check, give the guard a copy:
+
+```ts
+const result = await validateUser(request.clone());
+const rawText = await request.text();
+```
+
+## `invalidResponse`
+
+```ts
+invalidResponse(issues);                                 // 400, { errors: issues }
+invalidResponse(issues, { status: 422 });                // custom status
+invalidResponse(issues, { headers: { "x-request-id": id } });
+```
+
+It's a convenience. You can build any response you like from `result.issues` instead.
+
+## Form data and server actions
+
+The web guard reads JSON. HTML forms and Next.js server actions give you `FormData`, where every value is a string. Convert it to a plain object with the right types, then use the core `createGuard`:
+
+```ts
+"use server";
+import { createGuard } from "mongoose-guard";
+
+const profileGuard = createGuard(User, { allow: ["name", "age"], partial: true });
+
+export async function updateProfile(formData: FormData) {
+  const body = {
+    name: String(formData.get("name") ?? ""),
+    age: Number(formData.get("age")),
+  };
+  const result = await profileGuard.validate(body);
+  if (!result.ok) return { errors: result.issues };
+  // save result.data
+}
+```
+
+<Aside type="caution">
+mongoose-guard doesn't convert strings, so `age: "25"` from a form fails a Number field. That's deliberate. See [Strict types](/concepts/strict-types/).
+</Aside>

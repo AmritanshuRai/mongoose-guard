@@ -1,0 +1,48 @@
+---
+title: Limitations
+description: Everything mongoose-guard does not do or does differently than you might expect, including discriminators, query validation, type coercion, hooks, async validators and runtime support.
+---
+
+<div class="answer">
+mongoose-guard validates JSON request bodies against Mongoose models, and nothing else. It doesn't support discriminators yet, doesn't validate query strings or params, doesn't convert types, returns your input rather than a cast document, runs `pre("validate")` hooks, and needs Node.js. Each point below says what to do instead.
+</div>
+
+## Not supported
+
+**Discriminators.** A base model with discriminators (`Event` with `ClickEvent` and `ViewEvent`) isn't handled. The guard only sees the base schema. Guard the concrete discriminator model instead.
+
+**Query strings, route params, headers, cookies.** Bodies only. Use Zod, Joi or express-validator for the rest.
+
+**Models from other libraries.** Prisma, Drizzle, TypeORM and the native MongoDB driver have no Mongoose schema to read. Typegoose works, because `getModelForClass()` returns a real Mongoose model.
+
+**Mongoose 7 and older.** Only 8 and 9 are tested and supported.
+
+**Edge runtimes.** Cloudflare Workers and Vercel Edge functions can't run Mongoose.
+
+**Narrowing inside arrays of primitives, Maps and Mixed.** `"tags.0"`, `"scores.math"` and `"preferences.theme"` aren't valid allow entries. Allow the whole field.
+
+**Fastify, Koa and NestJS adapters.** Not in the package yet. [Without a framework](/guides/without-a-framework/) has short adapters you can copy.
+
+## Behaves differently than you might expect
+
+**No type conversion.** `"25"` fails a Number field. Convert form data and query-like input first. [Strict types](/concepts/strict-types/).
+
+**`data` is not a Mongoose document.** It's your input, trimmed to the allowed fields. Defaults, setters (`lowercase`, `trim`) and casting happen later, when you save.
+
+**`pre("validate")` hooks run.** Validation uses a throwaway document, so validate hooks fire on every guarded request. Keep side effects out of them.
+
+**Async validators run on every request.** A custom validator that queries the database runs that query each time a body passes the structural checks.
+
+**Required fields outside `allow` are skipped,** including inside sub-schemas and document arrays. Fill them in on the server before saving. Mongoose's save-time validation still catches anything you forget.
+
+**`unique` isn't checked.** Mongoose's `unique: true` creates an index, not a validator. Duplicates surface as `E11000` errors when you save.
+
+**Messages are in English.** They come from mongoose-guard or from Mongoose. Set custom messages in your schema, or map `code` and `rule` to your own text.
+
+**Mixed values are limited to 32 levels deep.** Deeper values fail with `invalid_body`.
+
+**The web adapter consumes the request body.** Pass `request.clone()` if you need to read it again.
+
+## Reporting a gap
+
+If something here blocks you, or you find behavior that isn't listed, open an issue on [GitHub](https://github.com/AmritanshuRai/mongoose-guard/issues) with the schema, the allow list and the body.

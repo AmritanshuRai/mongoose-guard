@@ -1,0 +1,57 @@
+---
+title: Strip mode
+description: Use unknown "strip" to remove unknown and forbidden fields silently instead of rejecting the request, when to choose it over the default reject mode, and what strip mode still rejects.
+---
+
+<div class="answer">
+By default mongoose-guard rejects a request that contains unknown or forbidden fields. With `unknown: "strip"` it removes those fields instead and lets the request through with the rest. Type errors, unsafe keys and failed Mongoose rules still fail the request in strip mode. Only the "this field shouldn't be here" checks become silent.
+</div>
+
+```ts
+guard(User, { allow: ["name"], unknown: "strip" });
+```
+
+## What changes
+
+Body: `{ "name": "Amrit", "role": "admin", "nickname": "A" }` with `allow: ["name"]`.
+
+| | `unknown: "reject"` (default) | `unknown: "strip"` |
+|---|---|---|
+| `role` (in schema, not allowed) | `forbidden_field` issue | removed |
+| `nickname` (not in schema) | `unknown_field` issue | removed |
+| Result | `ok: false` | `ok: true`, `data` is `{ "name": "Amrit" }` |
+
+## What strip mode still rejects
+
+| Problem | Strip mode |
+|---|---|
+| unknown field | removed |
+| forbidden field | removed |
+| wrong type, e.g. `"name": 42` | **rejected** (`invalid_type`) |
+| `__proto__`, `$where`, `"a.b"` | **rejected** (`unsafe_key`) |
+| failed Mongoose rule | **rejected** (`invalid_value`) |
+| body isn't an object | **rejected** (`invalid_body`) |
+
+Unsafe keys are always errors because a request carrying `$where` or `__proto__` is almost never an honest mistake. Removing those keys quietly would hide an attack from your logs.
+
+## Which mode to use
+
+Prefer the default, **reject**, for new APIs. Clients find out straight away when they send a field you don't accept. A typo like `prise` instead of `price` fails loudly instead of saving a product with no price change and a confused user.
+
+Choose **strip** when:
+
+- **Old clients send extra fields.** A mobile app version you can't force-update still sends a field you removed.
+- **Clients send whole objects back.** Some frontends fetch a document, edit it and send all of it back, `_id` and `createdAt` included. Strip mode keeps only what the route allows.
+- **You're adding mongoose-guard to an existing API.** Start with strip to avoid breaking anyone, log what gets stripped, then switch to reject.
+
+## Always save `req.validated`
+
+In strip mode, `req.body` still contains everything the client sent, including the stripped fields. Only `req.validated` (or `result.data`) is clean:
+
+```ts
+router.patch("/me", guard(User, { allow: ["name"], partial: true, unknown: "strip" }), async (req, res) => {
+  await User.updateOne({ _id: req.user.id }, { $set: req.validated }); // correct
+  // await User.updateOne({ _id: req.user.id }, { $set: req.body });  // would save role: "admin"
+  res.sendStatus(204);
+});
+```

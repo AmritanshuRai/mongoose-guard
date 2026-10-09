@@ -1,0 +1,69 @@
+---
+title: Options
+description: Every option mongoose-guard accepts, allow, partial, unknown and onInvalid, with defaults, allowed values and examples.
+---
+
+<div class="answer">
+Every guard takes the same three options: `allow` (required, the fields this route accepts), `partial` (default `false`, validate only sent fields) and `unknown` (default `"reject"`, or `"strip"` to drop unknown and forbidden fields). The Express adapter adds a fourth, `onInvalid`, to customise the error response.
+</div>
+
+| Option | Type | Default | Where |
+|---|---|---|---|
+| `allow` | `readonly string[]` | none, required | all |
+| `partial` | `boolean` | `false` | all |
+| `unknown` | `"reject" \| "strip"` | `"reject"` | all |
+| `onInvalid` | `(issues, req, res, next) => void` | sends `400 { errors }` | `mongoose-guard/express` only |
+
+## `allow`
+
+The schema paths this route accepts, written with dots.
+
+```ts
+{ allow: ["name", "email", "address.city", "addresses.city", "tags"] }
+```
+
+- Allowing a field allows everything inside it.
+- Allowing a nested field allows only that field.
+- Entries are checked against the schema when the guard is created. Typos throw a `GuardConfigError`.
+- `[]` is valid and accepts no fields.
+
+Full rules: [Allow list paths](/reference/allowlist-paths/).
+
+## `partial`
+
+```ts
+{ allow: ["name", "age"], partial: true }
+```
+
+| Value | Fields Mongoose validates |
+|---|---|
+| `false` | every sent field, plus every allowed field that wasn't sent (so `required` is enforced) |
+| `true` | only the sent fields |
+
+Use `true` for `PATCH`. Fields outside `allow` are never validated in either mode. See [Partial updates](/guides/partial-updates/).
+
+## `unknown`
+
+```ts
+{ allow: ["name"], unknown: "strip" }
+```
+
+| Value | Unknown and forbidden fields |
+|---|---|
+| `"reject"` | reported as `unknown_field` / `forbidden_field`; the request fails |
+| `"strip"` | removed from `data`; the request continues |
+
+Type errors, unsafe keys and failed rules fail the request in both modes. See [Strip mode](/guides/strip-mode/).
+
+## `onInvalid` (Express only)
+
+```ts
+{
+  allow: ["name"],
+  onInvalid: (issues, req, res, next) => {
+    res.status(422).json({ issues });
+  },
+}
+```
+
+Called instead of the default `400` response when validation fails. The route handler doesn't run unless you call `next()`. See [Custom error responses](/guides/custom-errors/).

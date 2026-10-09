@@ -1,0 +1,80 @@
+---
+title: Installation
+description: How to install mongoose-guard with npm, pnpm, yarn or bun, the supported Node.js, Mongoose and Express versions, and which import path to use.
+---
+
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+
+<div class="answer">
+Install `mongoose-guard` from npm next to `mongoose`. It needs Node.js 20 or newer and Mongoose 8 or 9. It has no runtime dependencies of its own.
+</div>
+
+<Tabs syncKey="pkg">
+  <TabItem label="npm">
+    ```bash
+    npm install mongoose-guard
+    ```
+  </TabItem>
+  <TabItem label="pnpm">
+    ```bash
+    pnpm add mongoose-guard
+    ```
+  </TabItem>
+  <TabItem label="yarn">
+    ```bash
+    yarn add mongoose-guard
+    ```
+  </TabItem>
+  <TabItem label="bun">
+    ```bash
+    bun add mongoose-guard
+    ```
+  </TabItem>
+</Tabs>
+
+## Requirements
+
+| Requirement | Supported | Notes |
+|---|---|---|
+| Node.js | 20, 22, 24 | Older versions are not tested. |
+| Mongoose | 8.x, 9.x | Every test runs against both. Mongoose 7 and older are not supported. |
+| Express | 4.x, 5.x | Only needed if you use `mongoose-guard/express`. |
+| TypeScript | tested with 5.9 and 6.0 | Optional. Types ship with the package. |
+
+`mongoose` is a peer dependency, so mongoose-guard uses the copy your app already has. `express` and `@types/express` are optional peers: you only need them for the Express adapter.
+
+## Pick an import
+
+The package has three entry points. Import only the one you need.
+
+| Import | Use it when |
+|---|---|
+| `mongoose-guard/express` | You use Express. Gives you a middleware. |
+| `mongoose-guard/web` | Your framework hands you a standard `Request`: Next.js route handlers, Hono, Remix, React Router, SvelteKit. |
+| `mongoose-guard` | Anything else, or tests. Gives you a plain function that takes a body and returns a result. |
+
+```ts
+import { guard } from "mongoose-guard/express";
+import { guard as webGuard, invalidResponse } from "mongoose-guard/web";
+import { createGuard, validateBody, GuardConfigError } from "mongoose-guard";
+```
+
+Importing `mongoose-guard/express` doesn't load the web adapter and vice versa.
+
+## ESM and CommonJS
+
+Both work. Use whichever your project already uses.
+
+```js
+// ESM
+import { guard } from "mongoose-guard/express";
+
+// CommonJS
+const { guard } = require("mongoose-guard/express");
+```
+
+TypeScript projects work with every `moduleResolution` setting, including the older `node` (`node10`) setting that many CommonJS Express projects still have.
+
+## Where it does not run
+
+mongoose-guard is tested on Node.js. Bun and Deno may work wherever Mongoose works on them, but they aren't tested. It does **not** run on edge runtimes such as Cloudflare Workers or Vercel Edge functions, because Mongoose needs a TCP connection to MongoDB that those runtimes don't provide.

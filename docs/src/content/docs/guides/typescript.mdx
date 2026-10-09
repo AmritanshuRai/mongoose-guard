@@ -1,0 +1,105 @@
+---
+title: TypeScript
+description: Types that ship with mongoose-guard, how req.validated is typed in Express, how to give validated data a precise type with InferSchemaType, and module resolution support.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+<div class="answer">
+mongoose-guard is written in TypeScript and ships its own types. You don't install anything extra. In Express, `req.validated` is typed as `Record<string, unknown> | undefined` automatically. For a precise type, pass a type argument to `createGuard` or the web `guard`, usually built from your schema with Mongoose's `InferSchemaType` and `Pick`.
+</div>
+
+## What's typed out of the box
+
+```ts
+import type {
+  Guard,          // what createGuard returns
+  GuardableModel, // what counts as a model
+  GuardOptions,   // { allow, partial?, unknown? }
+  GuardResult,    // { ok: true, data } | { ok: false, issues }
+  Issue,          // { code, path, message, rule? }
+  IssueCode,      // "invalid_body" | "unsafe_key" | ...
+  UnknownFieldPolicy, // "reject" | "strip"
+} from "mongoose-guard";
+
+import type { ExpressGuardOptions, InvalidHandler } from "mongoose-guard/express";
+import type { RequestGuard } from "mongoose-guard/web";
+```
+
+`GuardResult` is a discriminated union, so checking `ok` narrows it:
+
+```ts
+const result = await userGuard.validate(body);
+if (result.ok) {
+  result.data;   // available
+} else {
+  result.issues; // available
+}
+```
+
+## `req.validated` in Express
+
+Importing `mongoose-guard/express` anywhere in your project adds `validated` to Express's `Request` type:
+
+```ts
+app.post("/users", guard(User, { allow: ["name"] }), (req, res) => {
+  req.validated; // Record<string, unknown> | undefined
+});
+```
+
+It's `undefined` on routes without a guard, which is why the type includes it.
+
+## A precise type for the data
+
+mongoose-guard can't work out the type from your allow list on its own, because the list is just an array of strings. You say what you expect, and the type argument is applied to `data`:
+
+```ts
+import { type InferSchemaType } from "mongoose";
+import { createGuard } from "mongoose-guard";
+
+type UserFields = InferSchemaType<typeof userSchema>;
+type SignupBody = Pick<UserFields, "name" | "email" | "password">;
+
+const signupGuard = createGuard<SignupBody>(User, { allow: ["name", "email", "password"] });
+
+const result = await signupGuard.validate(body);
+if (result.ok) {
+  result.data.email; // string
+}
+```
+
+The web adapter takes the same type argument:
+
+```ts
+const validateSignup = guard<SignupBody>(User, { allow: ["name", "email", "password"] });
+```
+
+For Express, read `req.validated` through a small helper:
+
+```ts
+function validated<T>(req: Request): T {
+  return req.validated as T;
+}
+
+const body = validated<SignupBody>(req);
+```
+
+<Aside type="caution">
+The type argument is a promise you make, not something mongoose-guard checks. If your allow list says `["name"]` and your type says `{ name; email }`, TypeScript believes you. Keep the two next to each other. Also remember that `data` isn't cast: a `Date` field arrives as an ISO string in `data` until Mongoose saves it.
+</Aside>
+
+## Module resolution
+
+The package works with every `moduleResolution` setting:
+
+| `moduleResolution` | Works |
+|---|---|
+| `bundler` | yes |
+| `node16` / `nodenext` (ESM or CommonJS) | yes |
+| `node` / `node10` (common in older CommonJS projects) | yes |
+
+That's checked on every release with [`@arethetypeswrong/cli`](https://github.com/arethetypeswrong/arethetypeswrong.github.io).
+
+## Your models, any style
+
+mongoose-guard accepts anything that has a Mongoose `schema` and can be constructed like a model. Models declared with generics (`model<IUser>("User", schema)`), `InferSchemaType`, or no types at all all work.

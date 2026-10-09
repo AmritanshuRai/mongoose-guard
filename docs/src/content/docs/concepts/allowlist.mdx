@@ -1,0 +1,89 @@
+---
+title: The allow list
+description: What the allow option is, why every route needs its own, how dot paths reach into nested objects and arrays, and how mongoose-guard catches typos in allow entries at startup.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+<div class="answer">
+The `allow` option is the list of fields a route accepts, written as dot paths into the schema, like `"name"` or `"address.city"`. It's required, and it's the main idea in mongoose-guard: the schema says what valid data looks like, and the allow list says what *this route* may change. A field outside the list is rejected even if it's a perfectly valid field of the model.
+</div>
+
+## Why the schema alone isn't enough
+
+One model is usually written to by several routes, and each route has a different idea of what a client may touch:
+
+| Route | Who calls it | Fields it should accept |
+|---|---|---|
+| `POST /signup` | anyone | `name`, `email`, `password` |
+| `PATCH /me` | the logged-in user | `name`, `profile.bio` |
+| `PATCH /admin/users/:id` | an admin | `role`, `isVerified`, `credits` |
+
+The schema can't know which of those routes is running. You tell it, one route at a time:
+
+```ts
+router.post("/signup", guard(User, { allow: ["name", "email", "password"] }), signup);
+router.patch("/me", guard(User, { allow: ["name", "profile.bio"], partial: true }), updateMe);
+router.patch(
+  "/admin/users/:id",
+  requireAdmin,
+  guard(User, { allow: ["role", "isVerified", "credits"], partial: true }),
+  adminUpdate,
+);
+```
+
+## Writing entries
+
+An entry is a path into the schema, with dots between levels.
+
+| Entry | What it allows |
+|---|---|
+| `"name"` | the top-level `name` field |
+| `"address"` | the `address` object and everything inside it |
+| `"address.city"` | only `city` inside `address`. `address.zip` is rejected. |
+| `"addresses.city"` | `city` inside **every** element of the `addresses` array |
+| `"profile.links.github"` | one field three levels down, and none of its siblings |
+
+Allowing a parent allows everything below it. Allowing a child doesn't allow its siblings.
+
+Array indexes never appear in entries. `"addresses.city"` covers `addresses[0].city`, `addresses[1].city` and so on.
+
+All of this works the same way for plain nested objects (`profile: { bio: String }`), sub-schemas (`address: addressSchema`) and arrays of sub-schemas (`addresses: [addressSchema]`). [Nested data](/guides/nested-data/) has worked examples for each.
+
+## Typos fail at startup
+
+mongoose-guard checks every entry against the schema when you call `guard()` or `createGuard()`, which is normally when your server starts. A typo throws immediately:
+
+```ts
+guard(User, { allow: ["name", "adress"] });
+// GuardConfigError: mongoose-guard: allow entry "adress" does not match the schema ("adress" not found)
+```
+
+This is deliberate. A typo in an allow list would otherwise show up as a confusing `forbidden_field` error in production. Failing at startup means you find it on your machine.
+
+## Entries that can't be narrowed
+
+Some fields have no fixed set of keys inside them, so an entry can't point inside them. Allow the whole field instead.
+
+| Field type | Example | Not allowed | Use instead |
+|---|---|---|---|
+| Array of primitives | `tags: [String]` | `"tags.0"` | `"tags"` |
+| Map | `scores: { type: Map, of: Number }` | `"scores.math"` | `"scores"` |
+| Mixed | `preferences: Schema.Types.Mixed` | `"preferences.theme"` | `"preferences"` |
+
+```ts
+guard(User, { allow: ["tags.0"] });
+// GuardConfigError: mongoose-guard: allow entry "tags.0" reaches inside "tags", which has no named fields
+```
+
+## An empty list
+
+`allow: []` is valid and means "accept no fields". Any key in the body becomes a `forbidden_field` issue, and an empty object `{}` passes. It's occasionally useful for routes that should receive no body at all.
+
+## Fields like `_id`, `createdAt` and `__v`
+
+These are schema paths like any other. They're rejected unless you put them in the allow list, which you almost never should. With `timestamps: true`, a client that sends `createdAt` gets a `forbidden_field` issue.
+
+<Aside type="tip">
+Treat allow lists like permissions. Start with the fewest fields the route needs and add more when a real use case shows up. A field you forgot to allow produces an obvious 400 during development. A field you allowed by mistake produces a security bug nobody notices.
+</Aside>

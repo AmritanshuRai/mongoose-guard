@@ -1,0 +1,49 @@
+---
+title: Type rules
+description: The exact values mongoose-guard accepts for every Mongoose schema type, including String, Number, Boolean, Date, ObjectId, Decimal128, BigInt, Int32, Double, UUID, Buffer, Mixed, arrays and Maps.
+---
+
+<div class="answer">
+mongoose-guard checks each value against its schema type without converting it. This page lists, for every built-in Mongoose type, exactly which JSON values pass. Any value can also be `null`, except a plain nested object. Custom SchemaTypes from plugins skip this check and go straight to Mongoose.
+</div>
+
+| Schema type | Accepts | Rejected examples |
+|---|---|---|
+| `String` | any string | `42`, `true`, `{}` |
+| `Number` | finite numbers | `"42"`, `NaN`, `Infinity` |
+| `Schema.Types.Double` | finite numbers | `"4.5"` |
+| `Schema.Types.Int32` | integers from −2,147,483,648 to 2,147,483,647 | `4.5`, `2147483648` |
+| `BigInt` | a `bigint`, a safe integer number, or an integer string like `"9007199254740993"` | `4.2`, `"1.5"` |
+| `Boolean` | `true`, `false` | `"true"`, `0`, `1` |
+| `Date` | an ISO 8601 string (`"2024-05-01"`, `"2024-05-01T10:20:30Z"`, `"2024-05-01T10:20:30.000+05:30"`) or a valid `Date` object | `"yesterday"`, `1714557630000`, `"05/01/2024"` |
+| `Schema.Types.ObjectId` | a 24-character hex string, or an ObjectId instance | `"123"`, `42` |
+| `Schema.Types.Decimal128` | a finite number, a decimal string like `"10.50"` or `"1e3"`, or a Decimal128 instance | `"ten"`, `true` |
+| `Schema.Types.UUID` | a UUID string like `"123e4567-e89b-42d3-a456-426614174000"` | `"not-a-uuid"` |
+| `Buffer` | a string, or a `Uint8Array` / `Buffer` | `42` |
+| `Schema.Types.Mixed` | anything, scanned for unsafe keys | an object with a `$` key at any depth |
+
+## Containers
+
+| Schema shape | Accepts | Then checks |
+|---|---|---|
+| nested object `{ bio: String }` | a plain object (not `null`) | each key against the nested fields |
+| sub-schema `addressSchema` | a plain object or `null` | each key against the sub-schema |
+| array `[String]` | an array or `null` | every element against the element type |
+| nested array `[[Number]]` | an array of arrays | every element at every level |
+| document array `[addressSchema]` | an array or `null` | every element must be a plain object, then is checked against the sub-schema |
+| Map `{ type: Map, of: Number }` | a plain object or `null` | every key for safety and every value against `of` |
+| Map with no `of` | a plain object or `null` | every key for safety; values are treated as Mixed |
+
+"Plain object" means a JSON object. Instances of classes, such as `new Date()` where an object is expected, are rejected.
+
+## `null`
+
+`null` passes the type check for every field except a plain nested object. Whether it's acceptable is then up to your schema: a `required` field rejects `null` with `invalid_value` and `rule: "required"`.
+
+## Why dates and ObjectIds are strings
+
+JSON has no date or ObjectId type, so clients have to send them as strings. Accepting a well-formed string for those types isn't casting, it's the only way they can arrive. What mongoose-guard refuses is the loose stuff Mongoose also accepts, like a timestamp number for a Date or any 12-character string for an ObjectId.
+
+## Custom SchemaTypes
+
+If a field uses a SchemaType mongoose-guard doesn't know, such as one from a plugin, the type check is skipped for that field. Mongoose still casts and validates it in the last step, and a failed cast comes back as `invalid_type` with Mongoose's message.

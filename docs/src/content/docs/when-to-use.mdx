@@ -1,0 +1,84 @@
+---
+title: When to use it (and when not to)
+description: An honest guide to the projects and routes where mongoose-guard fits well, the ones where Zod or another validator is the better choice, and how to mix them.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+<div class="answer">
+Use mongoose-guard when a route receives a JSON body that will be saved, more or less as is, into a Mongoose model. Use something else for request data that has no model behind it: query strings, route params, headers, login forms, search filters, and payloads that get transformed heavily before they reach the database. Most apps end up using mongoose-guard for create and update routes and a general-purpose validator for the rest.
+</div>
+
+## Good fits
+
+**CRUD APIs.** "Create product", "update profile", "add comment". The body is a slice of a model, so the model already knows every rule.
+
+```ts
+router.post("/products", guard(Product, { allow: ["name", "price", "stock"] }), createProduct);
+router.patch("/products/:id", guard(Product, { allow: ["price", "stock"], partial: true }), updateProduct);
+```
+
+**Admin panels and internal tools.** Lots of forms, each one editing a few fields of a model. Writing a Zod schema per form is busywork.
+
+**Models with sensitive fields.** Anything with `role`, `isAdmin`, `balance`, `credits`, `ownerId`, `verified` or `plan`. The allow list makes "who can set what" explicit on every route.
+
+**Teams tired of keeping two schemas in sync.** If you've ever shipped a bug because the Zod schema said `max(100)` and the Mongoose schema said `maxLength: 80`, this is the problem mongoose-guard removes.
+
+**Existing Express apps that use `req.body` directly.** You can add a guard to one route at a time without restructuring anything.
+
+## Poor fits
+
+**Requests with no model behind them.** A login body (`{ email, password }`), a password reset, a search request or a payment webhook doesn't map onto a Mongoose model. There is nothing for mongoose-guard to read.
+
+**Query strings, route params and headers.** mongoose-guard validates bodies. `?page=2&sort=price`, `/users/:id` and `Authorization` need another tool.
+
+**Bodies that get transformed before saving.** If the client sends `{ "fullName": "Amrit Rai" }` and you store `{ first: "Amrit", last: "Rai" }`, the request and the model have different shapes. Validate the request with a schema written for the request.
+
+**Form posts.** HTML forms send every value as a string. mongoose-guard doesn't convert types, so `age: "25"` fails a Number field. Convert the values yourself first, or use a validator with built-in coercion, such as `z.coerce.number()` in Zod.
+
+**Edge runtimes.** Cloudflare Workers, Vercel Edge and similar runtimes can't run Mongoose, so they can't run mongoose-guard either.
+
+**Projects that don't use Mongoose.** Prisma, Drizzle, TypeORM and the native MongoDB driver aren't supported. mongoose-guard reads Mongoose schemas specifically.
+
+## Quick decision table
+
+| Situation | Use mongoose-guard? |
+|---|---|
+| `POST /users` saves the body as a new user | Yes |
+| `PATCH /users/:id` updates a few user fields | Yes, with `partial: true` |
+| `POST /login` checks an email and password | No, there's no Login model |
+| `GET /products?minPrice=10` | No, that's a query string |
+| `POST /orders` builds an order from a cart ID and a coupon code | No, the body doesn't look like an Order |
+| An admin form edits ten fields of a model | Yes |
+| A webhook from Stripe | No, verify the signature and validate with its own schema |
+| A Next.js route handler that creates a document | Yes, with `mongoose-guard/web` |
+| A Next.js server action that receives `FormData` | Only after you convert strings to the right types |
+| A Cloudflare Worker | No, Mongoose can't run there |
+
+## Mixing with Zod or Joi
+
+Using two tools is normal, and they don't conflict. A typical Express app looks like this:
+
+```ts
+import { z } from "zod";
+import { guard } from "mongoose-guard/express";
+
+// No model behind it: Zod
+const LoginBody = z.object({ email: z.string().email(), password: z.string() });
+router.post("/login", (req, res) => {
+  const result = LoginBody.safeParse(req.body);
+  if (!result.success) return res.status(400).json({ errors: result.error.issues });
+  // ...
+});
+
+// Saves into a model: mongoose-guard
+router.post("/users", guard(User, { allow: ["name", "email", "password"] }), createUser);
+```
+
+<Aside>
+The error shapes differ between tools. If your clients need one consistent error format, use [`onInvalid`](/guides/custom-errors/) to reshape mongoose-guard's issues to match the rest of your API.
+</Aside>
+
+## Still not sure?
+
+Ask yourself one question about the route: **"Is the request body a subset of a document I'm about to save?"** If yes, mongoose-guard fits. If you have to explain how the body *turns into* a document, use a schema written for the request.

@@ -1,0 +1,72 @@
+---
+title: How it works
+description: Inside mongoose-guard. How it compiles allow lists, reads Mongoose schema internals, walks the request body, and runs Mongoose validation on a throwaway document, including the Mongoose quirks it works around.
+---
+
+<div class="answer">
+When you create a guard, mongoose-guard resolves every allow entry against the model's schema. On each request it walks the body alongside the schema in one pass, collecting structural and type issues and building the accepted data. If that pass is clean, it creates a throwaway Mongoose document from the data and calls `validate()` on just the relevant paths, then converts Mongoose's errors into issues. Nothing is saved and no database connection is needed.
+</div>
+
+## 1. Compiling the guard
+
+`createGuard(Model, { allow })` runs once:
+
+1. It checks that `Model.schema` looks like a Mongoose schema.
+2. Each allow entry is split on dots and followed through the schema, segment by segment. A plain nested object, a sub-schema and a document array can be walked into. Anything else must be the last segment. A failed lookup throws a `GuardConfigError`.
+3. The entries go into two sets: the entries themselves, and every ancestor of every entry. Those two sets answer the only two questions asked at request time: "is this path allowed?" and "is something below this path allowed?"
+
+## 2. Walking the body
+
+The walker visits the body and the schema together. For each key it:
+
+1. rejects unsafe keys (`__proto__`, `$…`, dotted)
+2. looks the key up with Mongoose's `schema.pathType()`, which says whether it's a real field, a nested object or unknown
+3. checks the allow list
+4. figures out the field's shape from Mongoose's SchemaType: scalar, Mixed, sub-schema, document array, array or Map
+5. checks the value's type, then recurses into containers
+
+At the same time it builds the output object, so the accepted `data` comes out of the same pass. It also records which paths Mongoose should validate later.
+
+The walker reads a few Mongoose internals to tell shapes apart (`$isSingleNested`, `$isMongooseDocumentArray`, `$isMongooseArray`, and the array element type, which Mongoose 8 calls `caster` and Mongoose 9 calls `embeddedSchemaType`). Every test runs against both versions to catch changes.
+
+## 3. Running Mongoose validation
+
+If the walk found nothing wrong, mongoose-guard does roughly this:
+
+```ts
+await new Model(data).validate(paths);
+```
+
+The document is never saved. Using a real document instead of the static `Model.validate()` matters for two reasons:
+
+- validators that read `this` see a real document, just like on `save()`
+- the static method skipped some paths inside sub-schemas in testing, and the document method didn't
+
+`paths` is the list of fields to validate: the ones that were sent, plus, outside partial mode, the allowed ones that weren't sent, so `required` works.
+
+## 4. A Mongoose quirk it works around
+
+If you ask Mongoose 8.24 or 9.11 to validate several dotted paths inside the same sub-schema, such as `["address.city", "address.zip"]`, only the last one is actually checked. To get reliable results, mongoose-guard asks Mongoose to validate the whole sub-schema (`"address"`) and then keeps only the errors it actually asked about.
+
+The same filter applies everywhere: an error is only reported if its path, ignoring array indexes, is covered by the allow list. That's what keeps a required `trackingCode` that the client can't send from blocking a request that only allows `city`.
+
+## 5. Converting errors
+
+Each Mongoose `ValidatorError` becomes an `invalid_value` issue with Mongoose's message and its `kind` as `rule`. A `CastError` becomes `invalid_type`. Any error that isn't a Mongoose `ValidationError`, such as an exception from a hook, is re-thrown unchanged.
+
+## Performance
+
+- Compiling happens once per guard.
+- The walk is a single pass, linear in the size of the body.
+- Structural problems return before Mongoose runs, so bad requests are cheap to reject.
+- Valid requests pay for building one Mongoose document and running its validators, the same work a `save()` would do anyway.
+
+## Package layout
+
+| Import | Contents |
+|---|---|
+| `mongoose-guard` | allow-list compiler, body walker, Mongoose bridge, types |
+| `mongoose-guard/express` | a thin Express middleware around the core |
+| `mongoose-guard/web` | a thin wrapper that reads `request.json()` |
+
+The core is shared between entry points, so `instanceof GuardConfigError` works whichever one threw it. The package has no runtime dependencies. Mongoose is a peer dependency and is never imported at runtime: mongoose-guard only uses the model you pass in.

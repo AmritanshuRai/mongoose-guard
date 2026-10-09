@@ -1,0 +1,66 @@
+---
+title: Allow list paths
+description: The exact syntax and resolution rules for entries in mongoose-guard's allow option, including nested objects, sub-schemas, document arrays and the errors thrown for invalid entries.
+---
+
+<div class="answer">
+An allow entry is a dot-separated path into the schema, without array indexes. An entry allows the field it names and everything inside it. mongoose-guard resolves every entry against the schema when the guard is created, and throws a `GuardConfigError` for any entry that doesn't resolve.
+</div>
+
+## Syntax
+
+```text
+entry   = segment *( "." segment )
+segment = a schema field name (non-empty)
+```
+
+- Segments are field names exactly as written in the schema. They're case-sensitive.
+- Array indexes, wildcards, leading or trailing dots and empty segments are invalid.
+
+## How an entry resolves
+
+Each segment is looked up in turn:
+
+| Current segment is | Next segment may be |
+|---|---|
+| a plain nested object | one of its fields |
+| a sub-schema | one of the sub-schema's fields |
+| a document array | one of the element schema's fields |
+| anything else (String, Number, array of primitives, Map, Mixed, ...) | nothing. The entry must end here. |
+
+## Matching at request time
+
+A body path matches an entry when, ignoring array indexes, the entry is the path itself or one of its ancestors.
+
+| Entry | Body path | Allowed? |
+|---|---|---|
+| `address` | `address.city` | yes, `address` is an ancestor |
+| `address.city` | `address.city` | yes |
+| `address.city` | `address.zip` | no |
+| `address.city` | `address` | the object itself is let through so `city` can be checked |
+| `addresses.city` | `addresses.3.city` | yes, the index is ignored |
+| `profile.links.github` | `profile.links.site` | no |
+| `name` | `nam` | no, matching is exact per segment |
+
+## Configuration errors
+
+Every message starts with `mongoose-guard:`.
+
+| Entry | Error |
+|---|---|
+| `"adress"` | `allow entry "adress" does not match the schema ("adress" not found)` |
+| `"profile.age"` | `allow entry "profile.age" does not match the schema ("profile.age" not found)` |
+| `"tags.0"` | `allow entry "tags.0" reaches inside "tags", which has no named fields` |
+| `"preferences.theme"` (Mixed) | `allow entry "preferences.theme" reaches inside "preferences", which has no named fields` |
+| `""` | `invalid allow entry ""` |
+| `"address..city"` | `invalid allow entry "address..city"` |
+| `allow: "name"` (not an array) | `` `allow` must be an array of field paths `` |
+
+## Special paths
+
+| Path | Notes |
+|---|---|
+| `_id` | Rejected unless allowed. Rarely a good idea to allow on create routes. |
+| `__v` | Mongoose's version key. Rejected unless allowed. |
+| `createdAt`, `updatedAt` | Added by `timestamps: true`. Rejected unless allowed. |
+| virtuals | Not schema paths, so sending one is an `unknown_field`. |

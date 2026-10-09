@@ -1,0 +1,74 @@
+---
+title: Security
+description: What mongoose-guard protects against, mass assignment, prototype pollution, MongoDB operator injection and type confusion, and the threats it does not cover, with what to use instead.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+<div class="answer">
+mongoose-guard protects your API against four input attacks in request bodies: mass assignment (setting fields like `role`), prototype pollution (`__proto__` keys), MongoDB operator injection (`$where`, `$gt` and friends) and type confusion (an object where a string is expected). It does not handle authentication, authorization, query-string injection, rate limiting, body size, or output escaping. Those still need their own protection.
+</div>
+
+## What it protects against
+
+### Mass assignment
+
+**The attack:** sending fields the client shouldn't control, such as `role`, `isAdmin`, `credits` or `ownerId`, hoping the server saves the whole body.
+
+**The defence:** the `allow` list. Any schema field not listed for this route is a `forbidden_field` issue (or removed in strip mode). OWASP lists this under API3:2023, Broken Object Property Level Authorization.
+
+### Prototype pollution
+
+**The attack:** a body like `{"__proto__": {"isAdmin": true}}`. If code later merges it into another object, every object in the process can inherit `isAdmin: true`.
+
+**The defence:** `__proto__`, `constructor` and `prototype` are rejected as `unsafe_key` anywhere in the body. Real output:
+
+```json
+{ "code": "unsafe_key", "path": "__proto__", "message": "Key \"__proto__\" is reserved" }
+```
+
+### MongoDB operator injection
+
+**The attack:** sending an object with operators where the server expects a plain value. The classic example is a login query built from `{ "email": { "$ne": null } }`, which matches every user.
+
+**The defence**, in two layers:
+
+1. Typed fields only accept their type. `{ "$ne": null }` for a String field is `invalid_type: Expected string, received object`.
+2. Keys starting with `$` are rejected anywhere they could slip through, including inside Mixed fields and Map keys. Real output for a Mixed field:
+
+```json
+{ "code": "unsafe_key", "path": "preferences.filter.$where", "message": "Keys starting with $ are not allowed" }
+```
+
+Dotted keys like `"address.city"` are rejected too, because MongoDB interprets them as paths into nested documents.
+
+### Type confusion
+
+**The attack:** sending a different type than the code expects (an array instead of a string, a string instead of a number) to trip up comparisons, string methods or queries.
+
+**The defence:** strict type checks, with no casting. See [Strict types](/concepts/strict-types/).
+
+## Why unsafe keys are never stripped
+
+In strip mode, unknown and forbidden fields are removed quietly. Unsafe keys are not: they always fail the request. An honest client has no reason to send `$where` or `__proto__`. Removing them silently would let a probing attacker go unnoticed in your logs, so mongoose-guard makes them visible.
+
+## What it does not cover
+
+| Threat | Why mongoose-guard doesn't help | Use instead |
+|---|---|---|
+| Unauthenticated requests | It checks content, not identity | auth middleware before the guard |
+| Editing someone else's record | It doesn't know about `req.params.id` or ownership | an ownership check in the handler or a query filter |
+| Injection through query strings and params | It only validates bodies | validate `req.query` and `req.params` with Zod, Joi or express-validator; cast IDs explicitly |
+| Huge bodies | It sees the body after parsing | `express.json({ limit: "100kb" })` |
+| Too many requests | Not its job | a rate limiter |
+| XSS through stored strings | It doesn't escape or sanitize | escape on output, or sanitize HTML with a dedicated library |
+| Slow regular expressions in your schema | It runs your `match` rules as written | review `match` patterns for catastrophic backtracking |
+| Duplicate unique values | `unique` isn't a validator in Mongoose | handle `E11000` errors on save |
+
+<Aside type="caution">
+An allow list is only as safe as what you put in it. `allow: ["role"]` on a public route lets anyone set their role. Review allow lists the way you review permission checks.
+</Aside>
+
+## Reporting a vulnerability
+
+Please don't open a public issue for a security problem. Use GitHub's private vulnerability reporting on the [repository](https://github.com/AmritanshuRai/mongoose-guard/security).
