@@ -87,6 +87,7 @@ export default defineConfig({
         { tag: "meta", attrs: { property: "og:image:width", content: "1200" } },
         { tag: "meta", attrs: { property: "og:image:height", content: "630" } },
         { tag: "meta", attrs: { name: "twitter:card", content: "summary_large_image" } },
+        { tag: "meta", attrs: { name: "msvalidate.01", content: "CC29AB4E1AB958E9D5FDDC9D6334181C" } },
         { tag: "meta", attrs: { name: "twitter:image", content: `${site}${base}/og.png` } },
         {
           tag: "link",
